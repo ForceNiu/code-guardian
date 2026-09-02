@@ -11,7 +11,6 @@ const {
   parseFile,
   resolveImport,
   diffSymbols,
-  severityFor,
   resolveFileSymbols,
 } = require("../src/worker/analyze-core.cjs");
 
@@ -27,9 +26,19 @@ test("extractName 提取标识符名", () => {
 });
 
 test("nodeKind 识别声明类型与参数个数", () => {
-  assert.deepEqual(nodeKind({ type: "FunctionDeclaration", params: [1, 2] }), {
+  assert.deepEqual(nodeKind({ type: "FunctionDeclaration", params: [] }), {
     type: "function",
-    paramCount: 2,
+    paramCount: 0,
+    params: [],
+    returnType: "",
+    async: false,
+  });
+  assert.deepEqual(nodeKind({ type: "FunctionDeclaration", params: [], async: true }), {
+    type: "function",
+    paramCount: 0,
+    params: [],
+    returnType: "",
+    async: true,
   });
   assert.deepEqual(nodeKind({ type: "ClassDeclaration" }), { type: "class" });
   assert.deepEqual(nodeKind({ type: "TSInterfaceDeclaration" }), { type: "type" });
@@ -37,11 +46,56 @@ test("nodeKind 识别声明类型与参数个数", () => {
   assert.deepEqual(nodeKind({ type: "VariableDeclaration" }), { type: "variable" });
 });
 
+test("nodeKind 提取函数参数类型 / 可选 / 返回类型", () => {
+  const fnNode = {
+    type: "FunctionDeclaration",
+    params: [
+      {
+        type: "Identifier",
+        name: "id",
+        optional: false,
+        typeAnnotation: { type: "TSTypeAnnotation", typeAnnotation: { type: "TSStringKeyword" } },
+      },
+      {
+        type: "Identifier",
+        name: "opt",
+        optional: true,
+        typeAnnotation: { type: "TSTypeAnnotation", typeAnnotation: { type: "TSNumberKeyword" } },
+      },
+    ],
+    returnType: { type: "TSTypeAnnotation", typeAnnotation: { type: "TSVoidKeyword" } },
+    async: false,
+  };
+  assert.deepEqual(nodeKind(fnNode), {
+    type: "function",
+    paramCount: 2,
+    params: [
+      { type: "string", optional: false },
+      { type: "number", optional: true },
+    ],
+    returnType: "void",
+    async: false,
+  });
+});
+
 test("signature 生成签名（函数带参数个数）", () => {
-  assert.equal(signature({ type: "function", paramCount: 2 }), "function(2)");
+  assert.equal(signature({ type: "function", paramCount: 2 }), "function(2)"); // 旧数据（仅 paramCount）回退
   assert.equal(signature({ type: "function" }), "function(?)"); // 无 paramCount 回退 ?
   assert.equal(signature({ type: "variable" }), "variable");
   assert.equal(signature({ type: "class" }), "class");
+});
+
+test("signature 细签名（参数类型 / 可选 / 返回类型 / async）", () => {
+  const sym = {
+    type: "function",
+    params: [
+      { type: "string", optional: false },
+      { type: "number", optional: true },
+    ],
+    returnType: "void",
+  };
+  assert.equal(signature(sym), "function(string,number?):void");
+  assert.equal(signature({ ...sym, async: true }), "async function(string,number?):void");
 });
 
 test("parseFile 提取导出符号与 import", () => {
@@ -58,7 +112,16 @@ test("parseFile 提取导出符号与 import", () => {
   const { exports, imports } = parseFile(code);
 
   assert.deepEqual(exports, [
-    { name: "formatPrice", type: "function", line: 3, paramCount: 2 },
+    {
+      name: "formatPrice",
+      type: "function",
+      line: 3,
+      paramCount: 2,
+      params: [
+        { type: "number", optional: false },
+        { type: "number", optional: false },
+      ],
+    },
     { name: "TAX", type: "variable", line: 4 },
     { name: "Order", type: "class", line: 5 },
     { name: "Config", type: "type", line: 6 },
@@ -68,6 +131,28 @@ test("parseFile 提取导出符号与 import", () => {
   assert.deepEqual(imports, [
     { name: "add", source: "./math", line: 1 },
     { name: "User", source: "./types", line: 2 },
+  ]);
+});
+
+test("parseFile 提取函数参数类型 / 可选 / 返回类型 / async", () => {
+  const code = [
+    "export function f(a: string, b?: number): Promise<void> { return Promise.resolve(); }",
+    "export async function g() {}",
+  ].join("\n");
+  const { exports } = parseFile(code);
+  assert.deepEqual(exports, [
+    {
+      name: "f",
+      type: "function",
+      line: 1,
+      paramCount: 2,
+      params: [
+        { type: "string", optional: false },
+        { type: "number", optional: true },
+      ],
+      returnType: "Promise<void>",
+    },
+    { name: "g", type: "function", line: 2, paramCount: 0, params: [], async: true },
   ]);
 });
 
@@ -101,39 +186,63 @@ test("resolveImport 解析相对路径并补全扩展名", () => {
   assert.equal(resolveImport("./missing", "src/pages/home.tsx", allFiles), null);
 });
 
-test("diffSymbols 识别 added / removed / modified", () => {
+test("diffSymbols 识别 added / removed / modified（携带结构化符号）", () => {
   const file = "src/utils/format.ts";
 
   // 新增符号
-  assert.deepEqual(
-    diffSymbols(file, [], [{ name: "formatCurrency", type: "function", paramCount: 1, line: 10 }]),
-    [{ file, symbol: "formatCurrency", changeType: "added", newSignature: "function(1)", line: 10 }],
-  );
+  const newSym = {
+    name: "formatCurrency",
+    type: "function",
+    line: 10,
+    paramCount: 1,
+    params: [{ type: "number", optional: false }],
+  };
+  assert.deepEqual(diffSymbols(file, [], [newSym]), [
+    { file, symbol: "formatCurrency", changeType: "added", newSignature: "function(number)", newSymbol: newSym, line: 10 },
+  ]);
 
   // 删除符号
-  assert.deepEqual(
-    diffSymbols(file, [{ name: "formatDate", type: "function", paramCount: 1, line: 5 }], []),
-    [{ file, symbol: "formatDate", changeType: "removed", oldSignature: "function(1)", line: 5 }],
-  );
+  const oldSym = {
+    name: "formatDate",
+    type: "function",
+    line: 5,
+    paramCount: 1,
+    params: [{ type: "string", optional: false }],
+  };
+  assert.deepEqual(diffSymbols(file, [oldSym], []), [
+    { file, symbol: "formatDate", changeType: "removed", oldSignature: "function(string)", oldSymbol: oldSym, line: 5 },
+  ]);
 
   // 改签名（参数个数 1 → 2）
-  assert.deepEqual(
-    diffSymbols(
-      file,
-      [{ name: "formatPrice", type: "function", paramCount: 1, line: 3 }],
-      [{ name: "formatPrice", type: "function", paramCount: 2, line: 3 }],
-    ),
-    [
-      {
-        file,
-        symbol: "formatPrice",
-        changeType: "modified",
-        oldSignature: "function(1)",
-        newSignature: "function(2)",
-        line: 3,
-      },
+  const o2 = {
+    name: "formatPrice",
+    type: "function",
+    line: 3,
+    paramCount: 1,
+    params: [{ type: "number", optional: false }],
+  };
+  const n2 = {
+    name: "formatPrice",
+    type: "function",
+    line: 3,
+    paramCount: 2,
+    params: [
+      { type: "number", optional: false },
+      { type: "number", optional: false },
     ],
-  );
+  };
+  assert.deepEqual(diffSymbols(file, [o2], [n2]), [
+    {
+      file,
+      symbol: "formatPrice",
+      changeType: "modified",
+      oldSignature: "function(number)",
+      newSignature: "function(number,number)",
+      oldSymbol: o2,
+      newSymbol: n2,
+      line: 3,
+    },
+  ]);
 
   // 签名未变 → 不产生变更
   assert.deepEqual(
@@ -144,15 +253,6 @@ test("diffSymbols 识别 added / removed / modified", () => {
     ),
     [],
   );
-});
-
-test("severityFor 按变更类型 + 影响面判定严重度", () => {
-  assert.equal(severityFor("removed", 2), "high"); // 删除且有引用 → high
-  assert.equal(severityFor("removed", 0), "medium"); // 删除无引用 → medium
-  assert.equal(severityFor("modified", 3), "medium"); // 改签名有引用 → medium
-  assert.equal(severityFor("modified", 0), "low"); // 改签名无引用 → low
-  assert.equal(severityFor("added", 0), "low"); // 新增 → low
-  assert.equal(severityFor("added", 5), "low"); // 新增无论影响面 → low
 });
 
 test("resolveFileSymbols 增量缓存：变更重解析 / 命中复用 / miss 解析", () => {
@@ -168,7 +268,7 @@ test("resolveFileSymbols 增量缓存：变更重解析 / 命中复用 / miss �
   // 1) 变更文件：即使哈希命中也强制重解析（缓存不可信）
   const changed = resolveFileSymbols(file, true, code, hash, cache);
   assert.equal(changed.hitCache, false);
-  assert.deepEqual(changed.exports, [{ name: "f", type: "function", line: 1, paramCount: 0 }]);
+  assert.deepEqual(changed.exports, [{ name: "f", type: "function", line: 1, paramCount: 0, params: [] }]);
   assert.deepEqual(changed.imports, []); // code 里本无 import，证明走了 parse
 
   // 2) 未变更 + 命中：复用缓存（imports 来自缓存而非 parse）

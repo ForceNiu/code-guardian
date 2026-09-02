@@ -13,9 +13,9 @@ const {
   parseFile,
   resolveImport,
   diffSymbols,
-  severityFor,
   resolveFileSymbols,
 } = require("./analyze-core.cjs");
+const { runRules } = require("./rules.cjs");
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".cache", "coverage"]);
 
@@ -140,17 +140,18 @@ function main() {
     changedSymbols.push(...diffSymbols(file, oldExports, newExports));
   }
 
-  // 4) 影响链路：每个变更符号 -> 反向查 importers（M3 会在此接入确定性规则引擎）
+  // 4) 影响链路：每个变更符号 -> 反向查 importers -> 确定性规则引擎定级
   const impactChain = [];
   for (const cs of changedSymbols) {
     const impacted = reverseIndex.get(`${cs.file}#${cs.symbol}`) || [];
-    const severity = severityFor(cs.changeType, impacted.length);
+    const { severity, confidence } = runRules(cs, impacted.length);
     impactChain.push({
       file: cs.file,
       symbol: cs.symbol,
       changeType: cs.changeType,
       impactedFiles: impacted,
       severity,
+      confidence,
     });
   }
 

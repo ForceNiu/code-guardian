@@ -1,11 +1,21 @@
 // 分析引擎的公共类型定义（Worker 与主线程共享契约）
 
+/** 单个函数参数（M3 规则引擎的结构化原料） */
+export interface ParamInfo {
+  type: string; // 参数类型文本（无注解时为 ""）
+  optional: boolean; // 是否可选（id?: string）
+  rest?: boolean; // 是否 rest 参数（...args）
+}
+
 /** 单个导出符号 */
 export interface SymbolInfo {
   name: string;
   type: string; // function / variable / class / type / default
   line: number;
-  paramCount?: number; // 函数才有
+  paramCount?: number; // 函数才有（兼容旧增量缓存）
+  params?: ParamInfo[]; // 函数参数细节（M3 规则引擎原料，函数才有）
+  returnType?: string; // 函数返回类型文本（函数才有）
+  async?: boolean; // 是否 async 函数（函数才有）
 }
 
 /** 单个 import 声明 */
@@ -25,8 +35,14 @@ export interface ChangedSymbol {
   changeType: "added" | "removed" | "modified";
   oldSignature?: string;
   newSignature?: string;
+  /** M3：结构化符号信息，供规则引擎做精细判断（added 只有 newSymbol，removed 只有 oldSymbol） */
+  oldSymbol?: SymbolInfo;
+  newSymbol?: SymbolInfo;
   line: number;
 }
+
+/** 规则引擎置信度：proven=自身即证据可直接门禁 / heuristic=类型变但证明不了需复核 / uncertain=归不了类交 AI */
+export type Confidence = "proven" | "heuristic" | "uncertain";
 
 /** 一条影响链路（谁改动了 → 影响了哪些文件） */
 export interface ImpactEdge {
@@ -35,6 +51,7 @@ export interface ImpactEdge {
   changeType: ChangedSymbol["changeType"];
   impactedFiles: string[]; // 引用该符号的文件
   severity: "high" | "medium" | "low";
+  confidence: Confidence; // M3 规则引擎输出的置信度（供 AI 分流 + 前端标注）
 }
 
 /** Worker 输出的完整分析结果 */
