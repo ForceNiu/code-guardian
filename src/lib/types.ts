@@ -7,6 +7,13 @@ export interface ParamInfo {
   rest?: boolean; // 是否 rest 参数（...args）
 }
 
+/** type/interface 的单个字段（M3a-2 字段级规则的结构化原料） */
+export interface FieldInfo {
+  name: string; // 字段名
+  type: string; // 字段类型文本（无注解时为 ""）
+  optional: boolean; // 是否可选（age?: number）
+}
+
 /** 单个导出符号 */
 export interface SymbolInfo {
   name: string;
@@ -16,6 +23,8 @@ export interface SymbolInfo {
   params?: ParamInfo[]; // 函数参数细节（M3 规则引擎原料，函数才有）
   returnType?: string; // 函数返回类型文本（函数才有）
   async?: boolean; // 是否 async 函数（函数才有）
+  fields?: FieldInfo[]; // type/interface 字段细节（M3a-2 字段级原料，type 才有）
+  aliasType?: string; // type 别名目标类型文本（如 "string" / "SomeType"，非对象字面量的 type 别名才有）
 }
 
 /** 单个 import 声明 */

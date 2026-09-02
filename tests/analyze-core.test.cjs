@@ -124,7 +124,7 @@ test("parseFile 提取导出符号与 import", () => {
     },
     { name: "TAX", type: "variable", line: 4 },
     { name: "Order", type: "class", line: 5 },
-    { name: "Config", type: "type", line: 6 },
+    { name: "Config", type: "type", line: 6, fields: [{ name: "a", type: "number", optional: false }] },
     { name: "default", type: "default", line: 7 },
   ]);
 
@@ -285,4 +285,112 @@ test("resolveFileSymbols 增量缓存：变更重解析 / 命中复用 / miss �
   // 4) 未变更 + 无缓存：重解析
   const nocache = resolveFileSymbols(file, false, code, hash, undefined);
   assert.equal(nocache.hitCache, false);
+});
+
+// ===== M3a-2：type/interface 字段提取 =====
+
+test("nodeKind 提取 type/interface 字段（属性 / 可选 / 方法，按 name 排序）", () => {
+  const iface = {
+    type: "TSInterfaceDeclaration",
+    body: {
+      body: [
+        {
+          type: "TSPropertySignature",
+          key: { type: "Identifier", name: "name" },
+          optional: false,
+          typeAnnotation: { type: "TSTypeAnnotation", typeAnnotation: { type: "TSStringKeyword" } },
+        },
+        {
+          type: "TSPropertySignature",
+          key: { type: "Identifier", name: "age" },
+          optional: true,
+          typeAnnotation: { type: "TSTypeAnnotation", typeAnnotation: { type: "TSNumberKeyword" } },
+        },
+        { type: "TSMethodSignature", key: { type: "Identifier", name: "greet" }, optional: false },
+      ],
+    },
+  };
+  assert.deepEqual(nodeKind(iface), {
+    type: "type",
+    fields: [
+      { name: "age", type: "number", optional: true },
+      { name: "greet", type: "fn", optional: false },
+      { name: "name", type: "string", optional: false },
+    ],
+  });
+});
+
+test("parseFile 提取 interface 字段 / type 别名对象字面量字段，非对象字面量无字段", () => {
+  const code = [
+    "export interface User { name: string; age?: number }",
+    "export type Point = { x: number; y: number }",
+    "export type ID = string", // 非对象字面量，不追踪字段
+  ].join("\n");
+  const { exports } = parseFile(code);
+  assert.deepEqual(exports, [
+    {
+      name: "User",
+      type: "type",
+      line: 1,
+      fields: [
+        { name: "age", type: "number", optional: true },
+        { name: "name", type: "string", optional: false },
+      ],
+    },
+    {
+      name: "Point",
+      type: "type",
+      line: 2,
+      fields: [
+        { name: "x", type: "number", optional: false },
+        { name: "y", type: "number", optional: false },
+      ],
+    },
+    { name: "ID", type: "type", line: 3, aliasType: "string" },
+  ]);
+});
+
+test("signature type 字段签名 / 别名签名；无字段无别名的 type 回退为 'type'", () => {
+  const sym = {
+    type: "type",
+    fields: [
+      { name: "age", type: "number", optional: true },
+      { name: "name", type: "string", optional: false },
+    ],
+  };
+  assert.equal(signature(sym), "type{age:number?,name:string}");
+  assert.equal(signature({ type: "type", aliasType: "string" }), "type=string");
+  assert.equal(signature({ type: "type" }), "type");
+});
+
+test("diffSymbols 识别 type 字段变更（modified，携带 old/new 结构化符号）", () => {
+  const file = "src/types.ts";
+  const o = {
+    name: "User",
+    type: "type",
+    line: 1,
+    fields: [{ name: "name", type: "string", optional: false }],
+  };
+  const n = {
+    name: "User",
+    type: "type",
+    line: 1,
+    // extractFields 已按 name 排序，签名才稳定
+    fields: [
+      { name: "age", type: "number", optional: false },
+      { name: "name", type: "string", optional: false },
+    ],
+  };
+  assert.deepEqual(diffSymbols(file, [o], [n]), [
+    {
+      file,
+      symbol: "User",
+      changeType: "modified",
+      oldSignature: "type{name:string}",
+      newSignature: "type{age:number,name:string}",
+      oldSymbol: o,
+      newSymbol: n,
+      line: 1,
+    },
+  ]);
 });
