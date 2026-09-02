@@ -19,9 +19,100 @@ function extractName(id) {
   return null; // 解构 / 复杂模式暂不追踪
 }
 
+/**
+ * 把 TS 类型节点转成文本（手写轻量实现，不引 @babel/generator）。
+ * 只需满足两点：① any 精确识别；② 相同类型生成相同串、不同类型生成不同串（供 diff 用）。
+ * 复杂类型降级为节点类型名（稳定、够用）。
+ */
+function typeToString(t) {
+  if (!t) return "";
+  switch (t.type) {
+    case "TSAnyKeyword": return "any";
+    case "TSUnknownKeyword": return "unknown";
+    case "TSStringKeyword": return "string";
+    case "TSNumberKeyword": return "number";
+    case "TSBooleanKeyword": return "boolean";
+    case "TSNullKeyword": return "null";
+    case "TSUndefinedKeyword": return "undefined";
+    case "TSVoidKeyword": return "void";
+    case "TSNeverKeyword": return "never";
+    case "TSObjectKeyword": return "object";
+    case "TSBigIntKeyword": return "bigint";
+    case "TSSymbolKeyword": return "symbol";
+    case "TSThisType": return "this";
+    case "TSLiteralType": {
+      const lit = t.literal;
+      if (lit && typeof lit.value === "string") return `"${lit.value}"`;
+      return String(lit ? lit.value : "?");
+    }
+    case "TSTypeReference": {
+      const name = t.typeName && t.typeName.name ? t.typeName.name : "?";
+      if (t.typeParameters && t.typeParameters.params && t.typeParameters.params.length) {
+        return `${name}<${t.typeParameters.params.map(typeToString).join(", ")}>`;
+      }
+      return name;
+    }
+    case "TSUnionType": return (t.types || []).map(typeToString).join(" | ");
+    case "TSIntersectionType": return (t.types || []).map(typeToString).join(" & ");
+    case "TSArrayType": return `${typeToString(t.elementType)}[]`;
+    case "TSTupleType": return `[${(t.elementTypes || []).map(typeToString).join(", ")}]`;
+    case "TSFunctionType": return "fn";
+    case "TSParenthesizedType": return `(${typeToString(t.typeAnnotation)})`;
+    case "TSTypeLiteral": return "{...}";
+    case "TSOptionalType": return `${typeToString(t.typeAnnotation)}?`;
+    case "TSRestType": return `...${typeToString(t.typeAnnotation)}`;
+    case "TSTypeOperator": return `${t.operator || ""} ${typeToString(t.typeAnnotation)}`.trim();
+    case "TSIndexedAccessType": return `${typeToString(t.objectType)}[${typeToString(t.indexType)}]`;
+    default: return t.type;
+  }
+}
+
+/** 提取函数参数细节（类型 + 是否可选） */
+function extractParams(node) {
+  if (!node.params) return [];
+  return node.params.map((p) => {
+    if (p.type === "Identifier") {
+      return {
+        type: p.typeAnnotation ? typeToString(p.typeAnnotation.typeAnnotation) : "",
+        optional: !!p.optional,
+      };
+    }
+    if (p.type === "AssignmentPattern") {
+      // 带默认值 = 可省略
+      const left = p.left;
+      return {
+        type: left && left.typeAnnotation ? typeToString(left.typeAnnotation.typeAnnotation) : "",
+        optional: true,
+      };
+    }
+    if (p.type === "RestElement") {
+      return {
+        type: p.typeAnnotation ? typeToString(p.typeAnnotation.typeAnnotation) : "",
+        optional: false,
+        rest: true,
+      };
+    }
+    // 解构 / 复杂模式：暂不追踪类型
+    return { type: "", optional: false };
+  });
+}
+
+/** 提取函数返回类型文本（无注解返回 ""） */
+function returnTypeText(node) {
+  return node.returnType && node.returnType.typeAnnotation
+    ? typeToString(node.returnType.typeAnnotation)
+    : "";
+}
+
 function nodeKind(node) {
   if (node.type === "FunctionDeclaration" || node.type === "TSDeclareFunction") {
-    return { type: "function", paramCount: node.params ? node.params.length : 0 };
+    return {
+      type: "function",
+      paramCount: node.params ? node.params.length : 0,
+      params: extractParams(node),
+      returnType: returnTypeText(node),
+      async: !!node.async,
+    };
   }
   if (node.type === "ClassDeclaration") return { type: "class" };
   if (node.type === "TSInterfaceDeclaration" || node.type === "TSTypeAliasDeclaration") {
@@ -57,11 +148,14 @@ function parseFile(code) {
             if (name) exports.push({ name, type: "variable", line });
           }
         } else {
-          const { type, paramCount } = nodeKind(decl);
+          const info = nodeKind(decl);
           const name = decl.id ? decl.id.name : null;
           if (name) {
-            const sym = { name, type, line };
-            if (paramCount !== undefined) sym.paramCount = paramCount; // 仅函数携带参数个数
+            const sym = { name, type: info.type, line };
+            if (info.paramCount !== undefined) sym.paramCount = info.paramCount; // 仅函数携带参数个数
+            if (info.params) sym.params = info.params; // 函数参数细节（M3 原料）
+            if (info.returnType) sym.returnType = info.returnType; // 非空才存
+            if (info.async) sym.async = info.async; // 非 async 不存
             exports.push(sym);
           }
         }
@@ -108,8 +202,16 @@ function resolveImport(source, importerRel, allFiles) {
 }
 
 function signature(sym) {
-  if (sym.type === "function") return `${sym.type}(${sym.paramCount ?? "?"})`;
-  return sym.type;
+  if (sym.type !== "function") return sym.type;
+  if (Array.isArray(sym.params)) {
+    const params = sym.params
+      .map((p) => `${p.type || "?"}${p.optional ? "?" : ""}${p.rest ? "..." : ""}`)
+      .join(",");
+    const ret = sym.returnType ? `:${sym.returnType}` : "";
+    const prefix = sym.async ? "async " : "";
+    return `${prefix}function(${params})${ret}`;
+  }
+  return `function(${sym.paramCount ?? "?"})`; // 旧数据（仅 paramCount）回退
 }
 
 /** 对比某文件 base/head 的导出符号，输出变更符号列表（added / removed / modified） */
@@ -122,9 +224,9 @@ function diffSymbols(file, oldExports, newExports) {
     const o = oldMap.get(name);
     const n = newMap.get(name);
     if (!o && n) {
-      changed.push({ file, symbol: name, changeType: "added", newSignature: signature(n), line: n.line });
+      changed.push({ file, symbol: name, changeType: "added", newSignature: signature(n), newSymbol: n, line: n.line });
     } else if (o && !n) {
-      changed.push({ file, symbol: name, changeType: "removed", oldSignature: signature(o), line: o.line });
+      changed.push({ file, symbol: name, changeType: "removed", oldSignature: signature(o), oldSymbol: o, line: o.line });
     } else if (o && n && signature(o) !== signature(n)) {
       changed.push({
         file,
@@ -132,19 +234,13 @@ function diffSymbols(file, oldExports, newExports) {
         changeType: "modified",
         oldSignature: signature(o),
         newSignature: signature(n),
+        oldSymbol: o,
+        newSymbol: n,
         line: n.line,
       });
     }
   }
   return changed;
-}
-
-/** 严重度判定（确定性启发式，M3 会升级为 15~20 条 AST 规则） */
-function severityFor(changeType, impactedCount) {
-  if (changeType === "removed" && impactedCount > 0) return "high";
-  if (changeType === "removed") return "medium";
-  if (changeType === "modified" && impactedCount > 0) return "medium";
-  return "low";
 }
 
 /**
@@ -169,11 +265,11 @@ module.exports = {
   SOURCE_EXT,
   md5,
   extractName,
+  typeToString,
   nodeKind,
   signature,
   parseFile,
   resolveImport,
   diffSymbols,
-  severityFor,
   resolveFileSymbols,
 };
