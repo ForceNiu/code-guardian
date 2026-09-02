@@ -1,0 +1,23 @@
+# 本地开发用 Postgres（Neon 云库的兜底 / 离线路径）
+# 用法：docker compose up -d 后，把 .env 的 DATABASE_URL 指到本地：
+#   postgresql://codeguardian:codeguardian@localhost:5432/code_guardian?schema=public
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: code-guardian-db
+    environment:
+      POSTGRES_USER: codeguardian
+      POSTGRES_PASSWORD: codeguardian
+      POSTGRES_DB: code_guardian
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codeguardian -d code_guardian"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

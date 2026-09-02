@@ -1,0 +1,155 @@
+// 引擎纯函数单元测试（node:test + assert，零额外依赖）
+// 覆盖 analyze-core.cjs 的 8 个纯函数，固化当前已跑通的行为，防止将来改坏。
+
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  md5,
+  extractName,
+  nodeKind,
+  signature,
+  parseFile,
+  resolveImport,
+  diffSymbols,
+  severityFor,
+} = require("../src/worker/analyze-core.cjs");
+
+test("md5 返回标准哈希", () => {
+  assert.equal(md5(""), "d41d8cd98f00b204e9800998ecf8427e");
+  assert.equal(md5("hello"), "5d41402abc4b2a76b9719d911017c592");
+});
+
+test("extractName 提取标识符名", () => {
+  assert.equal(extractName({ type: "Identifier", name: "foo" }), "foo");
+  assert.equal(extractName({ type: "ObjectPattern" }), null); // 解构暂不追踪
+  assert.equal(extractName(null), null);
+});
+
+test("nodeKind 识别声明类型与参数个数", () => {
+  assert.deepEqual(nodeKind({ type: "FunctionDeclaration", params: [1, 2] }), {
+    type: "function",
+    paramCount: 2,
+  });
+  assert.deepEqual(nodeKind({ type: "ClassDeclaration" }), { type: "class" });
+  assert.deepEqual(nodeKind({ type: "TSInterfaceDeclaration" }), { type: "type" });
+  assert.deepEqual(nodeKind({ type: "TSTypeAliasDeclaration" }), { type: "type" });
+  assert.deepEqual(nodeKind({ type: "VariableDeclaration" }), { type: "variable" });
+});
+
+test("signature 生成签名（函数带参数个数）", () => {
+  assert.equal(signature({ type: "function", paramCount: 2 }), "function(2)");
+  assert.equal(signature({ type: "function" }), "function(?)"); // 无 paramCount 回退 ?
+  assert.equal(signature({ type: "variable" }), "variable");
+  assert.equal(signature({ type: "class" }), "class");
+});
+
+test("parseFile 提取导出符号与 import", () => {
+  const code = [
+    'import { add } from "./math";',
+    'import type { User } from "./types";',
+    "export function formatPrice(v: number, c: number) { return v; }",
+    "export const TAX = 0.1;",
+    "export class Order {}",
+    "export interface Config { a: number }",
+    "export default function main() {}",
+  ].join("\n");
+
+  const { exports, imports } = parseFile(code);
+
+  assert.deepEqual(exports, [
+    { name: "formatPrice", type: "function", line: 3, paramCount: 2 },
+    { name: "TAX", type: "variable", line: 4 },
+    { name: "Order", type: "class", line: 5 },
+    { name: "Config", type: "type", line: 6 },
+    { name: "default", type: "default", line: 7 },
+  ]);
+
+  assert.deepEqual(imports, [
+    { name: "add", source: "./math", line: 1 },
+    { name: "User", source: "./types", line: 2 },
+  ]);
+});
+
+test("parseFile 对空代码 / 非法代码安全降级为空", () => {
+  assert.deepEqual(parseFile(""), { exports: [], imports: [] });
+  assert.deepEqual(parseFile("   "), { exports: [], imports: [] });
+  assert.deepEqual(parseFile("const = = 语法错误"), { exports: [], imports: [] });
+});
+
+test("resolveImport 解析相对路径并补全扩展名", () => {
+  const allFiles = new Set([
+    "src/utils/format.ts",
+    "src/utils/math.ts",
+    "src/pages/home.tsx",
+    "src/services/api.ts",
+    "src/components/button/index.ts",
+  ]);
+
+  // 同目录补 .ts
+  assert.equal(resolveImport("./format", "src/utils/api.ts", allFiles), "src/utils/format.ts");
+  // 上一级目录
+  assert.equal(resolveImport("../utils/math", "src/services/api.ts", allFiles), "src/utils/math.ts");
+  // 补 /index.ts
+  assert.equal(
+    resolveImport("./button", "src/components/app.tsx", allFiles),
+    "src/components/button/index.ts",
+  );
+  // 非相对路径（node_modules）不追踪
+  assert.equal(resolveImport("react", "src/pages/home.tsx", allFiles), null);
+  // 不存在的相对路径
+  assert.equal(resolveImport("./missing", "src/pages/home.tsx", allFiles), null);
+});
+
+test("diffSymbols 识别 added / removed / modified", () => {
+  const file = "src/utils/format.ts";
+
+  // 新增符号
+  assert.deepEqual(
+    diffSymbols(file, [], [{ name: "formatCurrency", type: "function", paramCount: 1, line: 10 }]),
+    [{ file, symbol: "formatCurrency", changeType: "added", newSignature: "function(1)", line: 10 }],
+  );
+
+  // 删除符号
+  assert.deepEqual(
+    diffSymbols(file, [{ name: "formatDate", type: "function", paramCount: 1, line: 5 }], []),
+    [{ file, symbol: "formatDate", changeType: "removed", oldSignature: "function(1)", line: 5 }],
+  );
+
+  // 改签名（参数个数 1 → 2）
+  assert.deepEqual(
+    diffSymbols(
+      file,
+      [{ name: "formatPrice", type: "function", paramCount: 1, line: 3 }],
+      [{ name: "formatPrice", type: "function", paramCount: 2, line: 3 }],
+    ),
+    [
+      {
+        file,
+        symbol: "formatPrice",
+        changeType: "modified",
+        oldSignature: "function(1)",
+        newSignature: "function(2)",
+        line: 3,
+      },
+    ],
+  );
+
+  // 签名未变 → 不产生变更
+  assert.deepEqual(
+    diffSymbols(
+      file,
+      [{ name: "tax", type: "variable", line: 4 }],
+      [{ name: "tax", type: "variable", line: 4 }],
+    ),
+    [],
+  );
+});
+
+test("severityFor 按变更类型 + 影响面判定严重度", () => {
+  assert.equal(severityFor("removed", 2), "high"); // 删除且有引用 → high
+  assert.equal(severityFor("removed", 0), "medium"); // 删除无引用 → medium
+  assert.equal(severityFor("modified", 3), "medium"); // 改签名有引用 → medium
+  assert.equal(severityFor("modified", 0), "low"); // 改签名无引用 → low
+  assert.equal(severityFor("added", 0), "low"); // 新增 → low
+  assert.equal(severityFor("added", 5), "low"); // 新增无论影响面 → low
+});

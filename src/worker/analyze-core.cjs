@@ -1,0 +1,160 @@
+// 分析引擎的纯函数（无 IO、无副作用）：AST 解析 / 符号提取 / 反向索引 / 变更 diff / 严重度判定
+// 与 analyze.worker.cjs 分离，方便用 node:test 直接做单元测试。
+// 注意：本文件用 CommonJS（.cjs），可被 worker_threads 直接 require，不经打包器。
+
+const parser = require("@babel/parser");
+const traverse = require("@babel/traverse").default;
+const crypto = require("node:crypto");
+const path = require("node:path");
+
+const SOURCE_EXT = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"];
+
+function md5(s) {
+  return crypto.createHash("md5").update(s).digest("hex");
+}
+
+function extractName(id) {
+  if (!id) return null;
+  if (id.type === "Identifier") return id.name;
+  return null; // 解构 / 复杂模式暂不追踪
+}
+
+function nodeKind(node) {
+  if (node.type === "FunctionDeclaration" || node.type === "TSDeclareFunction") {
+    return { type: "function", paramCount: node.params ? node.params.length : 0 };
+  }
+  if (node.type === "ClassDeclaration") return { type: "class" };
+  if (node.type === "TSInterfaceDeclaration" || node.type === "TSTypeAliasDeclaration") {
+    return { type: "type" };
+  }
+  return { type: "variable" };
+}
+
+/** 解析单文件，提取导出符号 + import 声明（解析失败安全降级为空） */
+function parseFile(code) {
+  const exports = [];
+  const imports = [];
+  if (!code || !code.trim()) return { exports, imports };
+  let ast;
+  try {
+    ast = parser.parse(code, {
+      sourceType: "unambiguous",
+      plugins: ["typescript", "jsx"],
+    });
+  } catch {
+    return { exports, imports };
+  }
+
+  traverse(ast, {
+    ExportNamedDeclaration(p) {
+      const node = p.node;
+      const line = node.loc ? node.loc.start.line : 0;
+      if (node.declaration) {
+        const decl = node.declaration;
+        if (decl.type === "VariableDeclaration") {
+          for (const d of decl.declarations) {
+            const name = extractName(d.id);
+            if (name) exports.push({ name, type: "variable", line });
+          }
+        } else {
+          const { type, paramCount } = nodeKind(decl);
+          const name = decl.id ? decl.id.name : null;
+          if (name) {
+            const sym = { name, type, line };
+            if (paramCount !== undefined) sym.paramCount = paramCount; // 仅函数携带参数个数
+            exports.push(sym);
+          }
+        }
+      } else if (node.specifiers) {
+        for (const spec of node.specifiers) {
+          const name = spec.exported && (spec.exported.name || spec.exported.value);
+          if (name) exports.push({ name, type: "unknown", line });
+        }
+      }
+    },
+    ExportDefaultDeclaration(p) {
+      const line = p.node.loc ? p.node.loc.start.line : 0;
+      exports.push({ name: "default", type: "default", line });
+    },
+    ImportDeclaration(p) {
+      const line = p.node.loc ? p.node.loc.start.line : 0;
+      const source = p.node.source.value;
+      for (const spec of p.node.specifiers) {
+        let name;
+        if (spec.type === "ImportDefaultSpecifier") name = "default";
+        else if (spec.type === "ImportNamespaceSpecifier") name = "*";
+        else if (spec.type === "ImportSpecifier") name = spec.imported.name || spec.imported.value;
+        if (name) imports.push({ name, source, line });
+      }
+    },
+  });
+
+  return { exports, imports };
+}
+
+/** 把相对导入说明符解析成仓库内文件路径（补全扩展名 / index），无法解析返回 null */
+function resolveImport(source, importerRel, allFiles) {
+  if (!source.startsWith(".")) return null; // 仅追踪仓库内相对引用（node_modules 不关心）
+  const importerDir = path.posix.dirname(importerRel);
+  const base = path.posix.normalize(path.posix.join(importerDir, source));
+  const candidates = [base];
+  for (const ext of SOURCE_EXT) {
+    candidates.push(base + ext, base + "/index" + ext);
+  }
+  for (const c of candidates) {
+    if (allFiles.has(c)) return c;
+  }
+  return null;
+}
+
+function signature(sym) {
+  if (sym.type === "function") return `${sym.type}(${sym.paramCount ?? "?"})`;
+  return sym.type;
+}
+
+/** 对比某文件 base/head 的导出符号，输出变更符号列表（added / removed / modified） */
+function diffSymbols(file, oldExports, newExports) {
+  const changed = [];
+  const oldMap = new Map(oldExports.map((s) => [s.name, s]));
+  const newMap = new Map(newExports.map((s) => [s.name, s]));
+  const names = new Set([...oldMap.keys(), ...newMap.keys()]);
+  for (const name of names) {
+    const o = oldMap.get(name);
+    const n = newMap.get(name);
+    if (!o && n) {
+      changed.push({ file, symbol: name, changeType: "added", newSignature: signature(n), line: n.line });
+    } else if (o && !n) {
+      changed.push({ file, symbol: name, changeType: "removed", oldSignature: signature(o), line: o.line });
+    } else if (o && n && signature(o) !== signature(n)) {
+      changed.push({
+        file,
+        symbol: name,
+        changeType: "modified",
+        oldSignature: signature(o),
+        newSignature: signature(n),
+        line: n.line,
+      });
+    }
+  }
+  return changed;
+}
+
+/** 严重度判定（确定性启发式，M3 会升级为 15~20 条 AST 规则） */
+function severityFor(changeType, impactedCount) {
+  if (changeType === "removed" && impactedCount > 0) return "high";
+  if (changeType === "removed") return "medium";
+  if (changeType === "modified" && impactedCount > 0) return "medium";
+  return "low";
+}
+
+module.exports = {
+  SOURCE_EXT,
+  md5,
+  extractName,
+  nodeKind,
+  signature,
+  parseFile,
+  resolveImport,
+  diffSymbols,
+  severityFor,
+};

@@ -1,0 +1,114 @@
+// AI 代码副作用检测与审查治理平台 · 数据模型（5 张表）
+// 对应需求文档第四章。所有表名/字段名与文档一致。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 任务状态机：pending → parsing → analyzing → reporting → done/failed
+enum TaskStatus {
+  pending
+  parsing
+  analyzing
+  reporting
+  done
+  failed
+}
+
+// 人工反馈动作
+enum FeedbackAction {
+  adopt
+  reject
+  false_positive
+}
+
+// 表 1：仓库配置
+model Repository {
+  id            String   @id @default(cuid())
+  name          String
+  gitUrl        String   @unique @map("git_url") // 唯一：按 git 地址去重建仓库
+  defaultBranch String   @default("main") @map("default_branch")
+  rulesConfig   Json     @default("{}") @map("rules_config") // 规则开关，热更新
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tasks         Task[]
+  fileSnapshots FileSnapshot[]
+  exportSymbols ExportSymbol[]
+
+  @@map("repositories")
+}
+
+// 表 2：审查任务
+model Task {
+  id           String     @id @default(cuid())
+  repoId       String     @map("repo_id")
+  mrId         String     @map("mr_id")
+  commitSha    String     @map("commit_sha")
+  baseRef      String     @default("") @map("base_ref") // git diff 的基准（分支/tag/commit）
+  headRef      String     @default("") @map("head_ref") // 目标（分支/tag/commit）
+  status       TaskStatus @default(pending)
+  result       Json?      @map("result") // 最终审查报告（影响链路/风险等级）
+  errorMessage String?    @map("error_message")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  repo      Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  feedbacks Feedback[]
+
+  // 防重复入队：同一 MR 同一 commit 只处理一次
+  @@unique([repoId, mrId, commitSha])
+  @@index([status, createdAt])
+  @@map("tasks")
+}
+
+// 表 3：文件哈希缓存
+model FileSnapshot {
+  id          String   @id @default(cuid())
+  repoId      String   @map("repo_id")
+  filePath    String   @map("file_path")
+  contentHash String   @map("content_hash") // 内容 MD5，命中则跳过重解析
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  repo Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, filePath])
+  @@map("file_snapshots")
+}
+
+// 表 4：导出符号缓存（反向索引：符号 → 引用它的文件）
+model ExportSymbol {
+  id         String   @id @default(cuid())
+  repoId     String   @map("repo_id")
+  filePath   String   @map("file_path")
+  symbolName String   @map("symbol_name")
+  symbolType String   @map("symbol_type") // function / variable / class / type / default
+  importers  Json     @default("[]") // 引用该符号的文件路径列表
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  repo Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  // 加速「改这个函数，谁被影响」的查询
+  @@unique([repoId, filePath, symbolName])
+  @@index([repoId, symbolName])
+  @@map("export_symbols")
+}
+
+// 表 5：人工反馈
+model Feedback {
+  id        String         @id @default(cuid())
+  taskId    String         @map("task_id")
+  filePath  String         @map("file_path")
+  action    FeedbackAction
+  comment   String?
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("feedbacks")
+}
