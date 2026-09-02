@@ -50,6 +50,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    // 首次拉取 + 3s 轮询：setState 均在 await 之后（异步回调），非 effect 内同步 setState
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     const timer = setInterval(() => void load(), 3000);
     return () => clearInterval(timer);
