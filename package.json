@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "lint": "eslint .",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/analyze-core.test.cjs tests/webhook-adapters.test.ts",
@@ -35,6 +36,9 @@
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.3.4",
+    "globals": "^17.12.0",
     "prisma": "^6.19.3",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3"

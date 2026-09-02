@@ -3,6 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import {
   detectEvent,
   verifyGitHubSignature,
@@ -23,7 +24,7 @@ test("detectEvent 识别三源与未知", () => {
 test("verifyGitHubSignature 校验 HMAC-SHA256", () => {
   const secret = "s3cret";
   const body = '{"ref":"refs/heads/main"}';
-  const sig = "sha256=" + require("node:crypto").createHmac("sha256", secret).update(body).digest("hex");
+  const sig = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
 
   assert.equal(verifyGitHubSignature(secret, body, sig), true);
   assert.equal(verifyGitHubSignature("wrong", body, sig), false);
