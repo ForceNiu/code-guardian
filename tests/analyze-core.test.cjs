@@ -12,6 +12,7 @@ const {
   resolveImport,
   diffSymbols,
   severityFor,
+  resolveFileSymbols,
 } = require("../src/worker/analyze-core.cjs");
 
 test("md5 返回标准哈希", () => {
@@ -152,4 +153,36 @@ test("severityFor 按变更类型 + 影响面判定严重度", () => {
   assert.equal(severityFor("modified", 0), "low"); // 改签名无引用 → low
   assert.equal(severityFor("added", 0), "low"); // 新增 → low
   assert.equal(severityFor("added", 5), "low"); // 新增无论影响面 → low
+});
+
+test("resolveFileSymbols 增量缓存：变更重解析 / 命中复用 / miss 解析", () => {
+  const file = "src/a.ts";
+  const code = "export function f() {}";
+  const hash = md5(code);
+  const cache = {
+    hashByFile: { [file]: hash },
+    exportsByFile: { [file]: [{ name: "f", type: "function", line: 1, paramCount: 0 }] },
+    importsByFile: { [file]: [{ name: "x", source: "./b", line: 1 }] },
+  };
+
+  // 1) 变更文件：即使哈希命中也强制重解析（缓存不可信）
+  const changed = resolveFileSymbols(file, true, code, hash, cache);
+  assert.equal(changed.hitCache, false);
+  assert.deepEqual(changed.exports, [{ name: "f", type: "function", line: 1, paramCount: 0 }]);
+  assert.deepEqual(changed.imports, []); // code 里本无 import，证明走了 parse
+
+  // 2) 未变更 + 命中：复用缓存（imports 来自缓存而非 parse）
+  const hit = resolveFileSymbols(file, false, code, hash, cache);
+  assert.equal(hit.hitCache, true);
+  assert.deepEqual(hit.exports, cache.exportsByFile[file]);
+  assert.deepEqual(hit.imports, [{ name: "x", source: "./b", line: 1 }]);
+
+  // 3) 未变更 + 哈希不匹配：重解析
+  const miss = resolveFileSymbols(file, false, code, "stale-hash", cache);
+  assert.equal(miss.hitCache, false);
+  assert.deepEqual(miss.imports, []);
+
+  // 4) 未变更 + 无缓存：重解析
+  const nocache = resolveFileSymbols(file, false, code, hash, undefined);
+  assert.equal(nocache.hitCache, false);
 });

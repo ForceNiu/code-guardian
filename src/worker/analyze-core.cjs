@@ -147,6 +147,24 @@ function severityFor(changeType, impactedCount) {
   return "low";
 }
 
+/**
+ * 决定某文件的导出符号 + import 用缓存还是重新解析（增量缓存核心判断，纯函数）。
+ * - 变更文件：始终重新解析（内容变了，缓存不可信）
+ * - 未变更文件：内容哈希命中缓存则复用，否则解析
+ * 返回 { exports, imports, hitCache }。
+ */
+function resolveFileSymbols(file, isChanged, content, hash, cache) {
+  if (!isChanged && cache && cache.hashByFile && cache.hashByFile[file] === hash) {
+    return {
+      exports: cache.exportsByFile[file] || [],
+      imports: cache.importsByFile[file] || [],
+      hitCache: true,
+    };
+  }
+  const parsed = parseFile(content);
+  return { exports: parsed.exports, imports: parsed.imports, hitCache: false };
+}
+
 module.exports = {
   SOURCE_EXT,
   md5,
@@ -157,4 +175,5 @@ module.exports = {
   resolveImport,
   diffSymbols,
   severityFor,
+  resolveFileSymbols,
 };

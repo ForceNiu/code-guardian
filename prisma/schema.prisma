@@ -73,6 +73,7 @@ model FileSnapshot {
   repoId      String   @map("repo_id")
   filePath    String   @map("file_path")
   contentHash String   @map("content_hash") // 内容 MD5，命中则跳过重解析
+  symbols     Json?    @map("symbols") // 解析缓存：{ exports: SymbolInfo[], imports: ImportInfo[] }，命中哈希直接复用，跳过 parse
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   repo Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
