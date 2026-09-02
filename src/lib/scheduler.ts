@@ -2,7 +2,7 @@ import path from "node:path";
 import type { Task } from "@prisma/client";
 import { prisma } from "./prisma";
 import { runAnalysis } from "@/worker/run-analysis";
-import { persistSymbolTable } from "./persist";
+import { persistSymbolTable, readSymbolCache } from "./persist";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
 const POLL_INTERVAL_MS = 5000; // 每 5 秒轮询一次
@@ -76,12 +76,16 @@ async function processTask(task: Task) {
   try {
     await prisma.task.update({ where: { id: task.id }, data: { status: "analyzing" } });
 
+    // 增量缓存：先读上次分析结果，未变更文件跳过重解析
+    const cache = await readSymbolCache(task.repoId);
+
     const output = await runAnalysis({
       repoId: task.repoId,
       gitUrl: repo.gitUrl,
       baseRef: task.baseRef,
       headRef: task.headRef,
       workdir,
+      cache,
     });
 
     await prisma.task.update({ where: { id: task.id }, data: { status: "reporting" } });

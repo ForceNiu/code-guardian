@@ -14,6 +14,7 @@ const {
   resolveImport,
   diffSymbols,
   severityFor,
+  resolveFileSymbols,
 } = require("./analyze-core.cjs");
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".cache", "coverage"]);
@@ -80,20 +81,32 @@ function listSourceFiles(workdir) {
 }
 
 function main() {
-  const { gitUrl, baseRef, headRef, workdir } = workerData;
+  const { gitUrl, baseRef, headRef, workdir, cache } = workerData;
   ensureRepo(gitUrl, workdir);
 
   const allFiles = new Set(listSourceFiles(workdir));
   const changed = changedFiles(baseRef, headRef, workdir).filter((f) =>
     SOURCE_EXT.includes(path.extname(f)),
   );
+  const changedSet = new Set(changed);
 
-  // 1) 全量解析：导出符号表 + 各文件 import
+  // 1) 解析：变更文件重解析；未变更文件命中增量缓存则复用，否则解析
   const exportsByFile = new Map();
   const importsByFile = new Map();
+  const hashByFile = new Map();
+  let cacheHits = 0;
   for (const file of allFiles) {
     const content = fs.readFileSync(path.join(workdir, file), "utf8");
-    const { exports, imports } = parseFile(content);
+    const hash = md5(content);
+    hashByFile.set(file, hash);
+    const { exports, imports, hitCache } = resolveFileSymbols(
+      file,
+      changedSet.has(file),
+      content,
+      hash,
+      cache,
+    );
+    if (hitCache) cacheHits++;
     exportsByFile.set(file, exports);
     importsByFile.set(file, imports);
   }
@@ -147,6 +160,7 @@ function main() {
     totalSymbols: [...exportsByFile.values()].reduce((a, s) => a + s.length, 0),
     changedFileCount: changed.length,
     changedSymbolCount: changedSymbols.length,
+    cacheHits,
     high: impactChain.filter((i) => i.severity === "high").length,
     medium: impactChain.filter((i) => i.severity === "medium").length,
     low: impactChain.filter((i) => i.severity === "low").length,
@@ -155,15 +169,20 @@ function main() {
   // 6) 符号缓存表（供主线程持久化到 file_snapshots + export_symbols）
   const symbolTable = [];
   for (const [file, exports] of exportsByFile) {
-    const content = fs.readFileSync(path.join(workdir, file), "utf8");
-    const hash = md5(content);
+    const hash = hashByFile.get(file);
     const symbols = exports.map((s) => ({
       name: s.name,
       type: s.type,
       line: s.line,
       importers: reverseIndex.get(`${file}#${s.name}`) || [],
     }));
-    symbolTable.push({ filePath: file, hash, symbols });
+    symbolTable.push({
+      filePath: file,
+      hash,
+      symbols,
+      exports,
+      imports: importsByFile.get(file) || [],
+    });
   }
 
   parentPort.postMessage({

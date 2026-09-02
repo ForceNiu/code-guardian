@@ -47,6 +47,7 @@ export interface AnalysisResult {
     totalSymbols: number;
     changedFileCount: number;
     changedSymbolCount: number;
+    cacheHits: number; // 本次分析命中增量缓存（跳过 parse）的文件数
     high: number;
     medium: number;
     low: number;
@@ -63,6 +64,17 @@ export interface SymbolTableEntry {
     line: number;
     importers: string[];
   }[];
+  /** 完整导出符号（含 paramCount），写 file_snapshots.symbols 供下次增量复用 */
+  exports: SymbolInfo[];
+  /** 完整 import 列表，写 file_snapshots.symbols 供下次增量复用 */
+  imports: ImportInfo[];
+}
+
+/** 增量缓存：主线程从 file_snapshots 读出，随 workerData 传给 worker 复用 */
+export interface SymbolCache {
+  hashByFile: Record<string, string>;
+  exportsByFile: Record<string, SymbolInfo[]>;
+  importsByFile: Record<string, ImportInfo[]>;
 }
 
 /** Worker 输出：分析报告 + 符号缓存 */
@@ -78,6 +90,8 @@ export interface WorkerInput {
   baseRef: string;
   headRef: string;
   workdir: string;
+  /** 增量缓存（可选）：首次分析为空，后续分析复用上次解析结果 */
+  cache?: SymbolCache;
 }
 
 /** 一条待分析任务的执行上下文 */
