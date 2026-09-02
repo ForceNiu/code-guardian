@@ -135,6 +135,64 @@ function extractFields(decl) {
   return fields;
 }
 
+/**
+ * 提取 enum 成员名列表（保持声明顺序，不排序——数值 enum 隐式值依赖顺序）。
+ * 仅处理 TSEnumDeclaration；非 enum 返回 []。
+ */
+function extractEnumMembers(decl) {
+  if (!decl || decl.type !== "TSEnumDeclaration") return [];
+  return (decl.members || [])
+    .map((m) => (m.id ? m.id.name || m.id.value : null))
+    .filter((n) => n != null)
+    .map(String);
+}
+
+/**
+ * 提取 class 成员（方法/属性 + 可见性 + kind），供可见性规则（M3a-2）使用。
+ * 覆盖 ClassMethod/ClassProperty/ClassPrivateMethod/ClassPrivateProperty/TSAbstract 系列/TSDeclareMethod。
+ * 无显式 accessibility 默认 public；ES 私有字段（#foo）标为 private 且 name 带 # 前缀。
+ * 成员按 name 排序（class 成员顺序对外部 API 无影响，排序保证签名稳定）。
+ */
+function extractClassMembers(decl) {
+  if (!decl || decl.type !== "ClassDeclaration") return [];
+  const body = decl.body && decl.body.body ? decl.body.body : [];
+  const members = [];
+  for (const m of body) {
+    let kind = null;
+    let name = null;
+    let isPrivateField = false;
+    if (m.type === "ClassMethod") {
+      kind = "method";
+      name = m.key && (m.key.name || m.key.value);
+    } else if (m.type === "ClassPrivateMethod") {
+      kind = "method";
+      name = m.key && m.key.id && m.key.id.name;
+      isPrivateField = true;
+    } else if (m.type === "ClassProperty") {
+      kind = "property";
+      name = m.key && (m.key.name || m.key.value);
+    } else if (m.type === "ClassPrivateProperty") {
+      kind = "property";
+      name = m.key && m.key.id && m.key.id.name;
+      isPrivateField = true;
+    } else if (m.type === "TSAbstractMethod") {
+      kind = "method";
+      name = m.key && (m.key.name || m.key.value);
+    } else if (m.type === "TSAbstractProperty") {
+      kind = "property";
+      name = m.key && (m.key.name || m.key.value);
+    } else if (m.type === "TSDeclareMethod") {
+      kind = "method";
+      name = m.key && (m.key.name || m.key.value);
+    }
+    if (name == null) continue;
+    const visibility = isPrivateField ? "private" : m.accessibility || "public";
+    members.push({ name: isPrivateField ? `#${name}` : String(name), visibility, kind });
+  }
+  members.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return members;
+}
+
 function nodeKind(node) {
   if (node.type === "FunctionDeclaration" || node.type === "TSDeclareFunction") {
     return {
@@ -145,7 +203,18 @@ function nodeKind(node) {
       async: !!node.async,
     };
   }
-  if (node.type === "ClassDeclaration") return { type: "class" };
+  if (node.type === "ClassDeclaration") {
+    const members = extractClassMembers(node);
+    const result = { type: "class" };
+    if (members.length) result.classMembers = members;
+    return result;
+  }
+  if (node.type === "TSEnumDeclaration") {
+    const members = extractEnumMembers(node);
+    const result = { type: "enum" };
+    if (members.length) result.enumMembers = members;
+    return result;
+  }
   if (node.type === "TSInterfaceDeclaration" || node.type === "TSTypeAliasDeclaration") {
     const fields = extractFields(node);
     const result = { type: "type" };
@@ -197,13 +266,22 @@ function parseFile(code) {
             if (info.async) sym.async = info.async; // 非 async 不存
             if (info.fields && info.fields.length) sym.fields = info.fields; // type/interface 字段（M3a-2 原料，非空才存）
             if (info.aliasType) sym.aliasType = info.aliasType; // type 别名目标类型（M3a-2 原料，非空才存）
+            if (info.enumMembers && info.enumMembers.length) sym.enumMembers = info.enumMembers; // enum 成员（M3a-2 原料，非空才存）
+            if (info.classMembers && info.classMembers.length) sym.classMembers = info.classMembers; // class 成员（M3a-2 原料，非空才存）
             exports.push(sym);
           }
         }
       } else if (node.specifiers) {
         for (const spec of node.specifiers) {
+          // export { local as exported } / export { local as exported } from './x'
+          // ExportSpecifier：记导出名（下游 import 的 key）+ local 绑定映射（重命名导出识别用，M3a-2）
           const name = spec.exported && (spec.exported.name || spec.exported.value);
-          if (name) exports.push({ name, type: "unknown", line });
+          const localName = spec.local && (spec.local.name || spec.local.value);
+          if (name) {
+            const sym = { name, type: "reexport", line };
+            if (localName) sym.localName = localName;
+            exports.push(sym);
+          }
         }
       }
     },
@@ -265,6 +343,19 @@ function signature(sym) {
   if (sym.type === "type" && sym.aliasType) {
     return `type=${sym.aliasType}`;
   }
+  // reexport 签名：体现 local 绑定（导出名变化走 removed+added 配对，local 变化走 modified）
+  if (sym.type === "reexport") return `reexport:${sym.localName || sym.name}`;
+  // enum 签名：enum{成员,...}，成员变化才触发 modified（M3a-2，成员保持声明顺序）
+  if (sym.type === "enum" && Array.isArray(sym.enumMembers) && sym.enumMembers.length) {
+    return `enum{${sym.enumMembers.join(",")}}`;
+  }
+  // class 签名：class{成员:可见性,...}，方法加 ()，成员变化才触发 modified（M3a-2）
+  if (sym.type === "class" && Array.isArray(sym.classMembers) && sym.classMembers.length) {
+    const members = sym.classMembers
+      .map((m) => `${m.name}${m.kind === "method" ? "()" : ""}:${m.visibility}`)
+      .join(",");
+    return `class{${members}}`;
+  }
   return sym.type;
 }
 
@@ -294,7 +385,51 @@ function diffSymbols(file, oldExports, newExports) {
       });
     }
   }
-  return changed;
+  return pairRenameExports(changed);
+}
+
+/**
+ * 识别「重命名导出」：removed 的 reexport 与 added 的 reexport 若 local 绑定相同，
+ * 说明是同一个东西改了导出名（export { x as y } → export { x as z }），
+ * 合并成一条 changeType="renamed" 变更，供规则引擎精确定级（M3a-2）。
+ */
+function pairRenameExports(changed) {
+  const removed = changed.filter(
+    (c) => c.changeType === "removed" && c.oldSymbol && c.oldSymbol.type === "reexport" && c.oldSymbol.localName
+  );
+  const added = changed.filter(
+    (c) => c.changeType === "added" && c.newSymbol && c.newSymbol.type === "reexport" && c.newSymbol.localName
+  );
+  if (!removed.length || !added.length) return changed;
+
+  const result = [];
+  const pairedAdded = new Set();
+  for (const r of removed) {
+    const a = added.find((x) => !pairedAdded.has(x) && x.newSymbol.localName === r.oldSymbol.localName);
+    if (a) {
+      pairedAdded.add(a);
+      result.push({
+        file: r.file,
+        symbol: r.symbol, // 旧导出名
+        newName: a.symbol, // 新导出名
+        localName: r.oldSymbol.localName,
+        changeType: "renamed",
+        oldSignature: r.oldSignature,
+        newSignature: a.newSignature,
+        oldSymbol: r.oldSymbol,
+        newSymbol: a.newSymbol,
+        line: a.line,
+      });
+    } else {
+      result.push(r); // 无配对的 removed 保留原样
+    }
+  }
+  for (const c of changed) {
+    if (c.changeType === "removed") continue; // removed 已在上面对待
+    if (c.changeType === "added" && pairedAdded.has(c)) continue; // 已配对成 renamed
+    result.push(c);
+  }
+  return result;
 }
 
 /**
@@ -321,10 +456,13 @@ module.exports = {
   extractName,
   typeToString,
   extractFields,
+  extractEnumMembers,
+  extractClassMembers,
   nodeKind,
   signature,
   parseFile,
   resolveImport,
   diffSymbols,
+  pairRenameExports,
   resolveFileSymbols,
 };

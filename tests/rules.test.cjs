@@ -7,6 +7,8 @@ const {
   runRules,
   classifyFunctionChange,
   classifyTypeFieldChange,
+  classifyEnumChange,
+  classifyClassChange,
   containsAny,
 } = require("../src/worker/rules.cjs");
 
@@ -24,6 +26,17 @@ function typeSym(fields = [], extra = {}) {
 function field(name, type, optional = false) {
   return { name, type, optional };
 }
+
+test("重命名导出：high/proven（删了旧导出名，下游 import 旧名的崩了）", () => {
+  const cs = {
+    changeType: "renamed",
+    oldSymbol: { type: "reexport", localName: "x", name: "oldName" },
+    newSymbol: { type: "reexport", localName: "x", name: "newName" },
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+  // proven 的 high 不受影响面升级影响（已到顶）
+  assert.deepEqual(runRules(cs, 8), { severity: "high", confidence: "proven" });
+});
 
 test("删除导出：有引用 → high/proven，无引用 → medium/proven", () => {
   assert.deepEqual(runRules({ changeType: "removed", oldSymbol: fn() }, 3), {
@@ -424,4 +437,134 @@ test("type 别名目标类型变化：any→具体 收紧 high；具体→any �
     ),
     { severity: "medium", confidence: "heuristic" },
   );
+});
+
+// enum 符号构造器
+function enumSym(members = []) {
+  return { name: "E", type: "enum", line: 1, ...(members.length ? { enumMembers: members } : {}) };
+}
+
+test("删除 enum 成员 → high/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: enumSym(["Red", "Green", "Blue"]),
+    newSymbol: enumSym(["Red", "Green"]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("新增 enum 成员 → low/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: enumSym(["Red"]),
+    newSymbol: enumSym(["Red", "Green"]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "low", confidence: "proven" });
+});
+
+test("enum 成员重命名（删旧+增新）→ high/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: enumSym(["Red", "Green"]),
+    newSymbol: enumSym(["Red", "Blue"]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("enum 成员集相同（仅顺序变）→ low/uncertain 交 AI", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: enumSym(["Red", "Green"]),
+    newSymbol: enumSym(["Green", "Red"]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "low", confidence: "uncertain" });
+});
+
+test("classifyEnumChange 直接分类", () => {
+  assert.equal(classifyEnumChange(enumSym(["Red", "Green", "Blue"]), enumSym(["Red", "Green"])), "removedEnumMember");
+  assert.equal(classifyEnumChange(enumSym(["Red"]), enumSym(["Red", "Green"])), "addedEnumMember");
+  assert.equal(classifyEnumChange(enumSym(["Red", "Green"]), enumSym(["Green", "Red"])), "unknown");
+});
+
+// class 符号构造器
+function classSym(members = []) {
+  return { name: "C", type: "class", line: 1, ...(members.length ? { classMembers: members } : {}) };
+}
+function member(name, visibility = "public", kind = "method") {
+  return { name, visibility, kind };
+}
+
+test("删除 class 成员 → high/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: classSym([member("render"), member("helper")]),
+    newSymbol: classSym([member("render")]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("新增 class 成员 → low/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: classSym([member("render")]),
+    newSymbol: classSym([member("render"), member("helper")]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "low", confidence: "proven" });
+});
+
+test("class 成员重命名（删旧+增新）→ high/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: classSym([member("render")]),
+    newSymbol: classSym([member("draw")]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("可见性 public→private 收紧 high；private→public 放宽 low", () => {
+  const narrow = {
+    changeType: "modified",
+    oldSymbol: classSym([member("render", "public")]),
+    newSymbol: classSym([member("render", "private")]),
+  };
+  assert.deepEqual(runRules(narrow, 0), { severity: "high", confidence: "proven" });
+  const widen = {
+    changeType: "modified",
+    oldSymbol: classSym([member("render", "private")]),
+    newSymbol: classSym([member("render", "public")]),
+  };
+  assert.deepEqual(runRules(widen, 0), { severity: "low", confidence: "proven" });
+});
+
+test("protected 参与收紧/放宽方向判定", () => {
+  const p2pro = { changeType: "modified", oldSymbol: classSym([member("x", "public")]), newSymbol: classSym([member("x", "protected")]) };
+  assert.deepEqual(runRules(p2pro, 0), { severity: "high", confidence: "proven" });
+  const pro2pri = { changeType: "modified", oldSymbol: classSym([member("x", "protected")]), newSymbol: classSym([member("x", "private")]) };
+  assert.deepEqual(runRules(pro2pri, 0), { severity: "high", confidence: "proven" });
+  const pri2pro = { changeType: "modified", oldSymbol: classSym([member("x", "private")]), newSymbol: classSym([member("x", "protected")]) };
+  assert.deepEqual(runRules(pri2pro, 0), { severity: "low", confidence: "proven" });
+});
+
+test("方法↔属性 kind 变 → high/proven", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: classSym([{ name: "x", visibility: "public", kind: "method" }]),
+    newSymbol: classSym([{ name: "x", visibility: "public", kind: "property" }]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("classifyClassChange 直接分类", () => {
+  assert.equal(classifyClassChange(classSym([member("a"), member("b")]), classSym([member("a")])), "removedClassMember");
+  assert.equal(classifyClassChange(classSym([member("a")]), classSym([member("a"), member("b")])), "addedClassMember");
+  assert.equal(classifyClassChange(classSym([member("a", "public")]), classSym([member("a", "private")])), "memberVisibilityNarrowed");
+  assert.equal(classifyClassChange(classSym([member("a", "private")]), classSym([member("a", "public")])), "memberVisibilityWidened");
+  assert.equal(
+    classifyClassChange(
+      classSym([{ name: "a", visibility: "public", kind: "method" }]),
+      classSym([{ name: "a", visibility: "public", kind: "property" }]),
+    ),
+    "memberKindChanged",
+  );
+  assert.equal(classifyClassChange(classSym([member("a")]), classSym([member("a")])), "unknown");
 });
