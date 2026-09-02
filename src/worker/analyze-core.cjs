@@ -104,6 +104,37 @@ function returnTypeText(node) {
     : "";
 }
 
+/**
+ * 提取 type/interface 的字段细节（name + 类型 + 可选性），供字段级规则（M3a-2）使用。
+ * 仅处理对象字面量形态：TSInterfaceDeclaration 的 body、TSTypeAliasDeclaration 的 TSTypeLiteral。
+ * type 别名引用/联合等非对象字面量返回 []（暂不追踪字段，归 uncertain 交 AI）。
+ * 字段按 name 排序，保证签名稳定（interface 字段顺序语义无关，重排不应触发 modified）。
+ */
+function extractFields(decl) {
+  let members = [];
+  if (decl.type === "TSInterfaceDeclaration") {
+    members = (decl.body && decl.body.body) || [];
+  } else if (decl.type === "TSTypeAliasDeclaration") {
+    const t = decl.typeAnnotation;
+    if (t && t.type === "TSTypeLiteral") members = t.members || [];
+    else return [];
+  }
+  const fields = [];
+  for (const m of members) {
+    if (m.type !== "TSPropertySignature" && m.type !== "TSMethodSignature") continue;
+    const key = m.key;
+    const name = key && key.name !== undefined ? key.name : key && key.value;
+    if (name === undefined || name === null) continue;
+    const type =
+      m.type === "TSPropertySignature"
+        ? (m.typeAnnotation ? typeToString(m.typeAnnotation.typeAnnotation) : "")
+        : "fn";
+    fields.push({ name: String(name), type, optional: !!m.optional });
+  }
+  fields.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return fields;
+}
+
 function nodeKind(node) {
   if (node.type === "FunctionDeclaration" || node.type === "TSDeclareFunction") {
     return {
@@ -116,7 +147,15 @@ function nodeKind(node) {
   }
   if (node.type === "ClassDeclaration") return { type: "class" };
   if (node.type === "TSInterfaceDeclaration" || node.type === "TSTypeAliasDeclaration") {
-    return { type: "type" };
+    const fields = extractFields(node);
+    const result = { type: "type" };
+    if (fields.length) result.fields = fields;
+    // type 别名（非 interface）且非对象字面量时，记录目标类型文本，供别名类型变化定级
+    if (node.type === "TSTypeAliasDeclaration") {
+      const t = node.typeAnnotation;
+      if (t && t.type !== "TSTypeLiteral") result.aliasType = typeToString(t);
+    }
+    return result;
   }
   return { type: "variable" };
 }
@@ -156,6 +195,8 @@ function parseFile(code) {
             if (info.params) sym.params = info.params; // 函数参数细节（M3 原料）
             if (info.returnType) sym.returnType = info.returnType; // 非空才存
             if (info.async) sym.async = info.async; // 非 async 不存
+            if (info.fields && info.fields.length) sym.fields = info.fields; // type/interface 字段（M3a-2 原料，非空才存）
+            if (info.aliasType) sym.aliasType = info.aliasType; // type 别名目标类型（M3a-2 原料，非空才存）
             exports.push(sym);
           }
         }
@@ -202,16 +243,29 @@ function resolveImport(source, importerRel, allFiles) {
 }
 
 function signature(sym) {
-  if (sym.type !== "function") return sym.type;
-  if (Array.isArray(sym.params)) {
-    const params = sym.params
-      .map((p) => `${p.type || "?"}${p.optional ? "?" : ""}${p.rest ? "..." : ""}`)
-      .join(",");
-    const ret = sym.returnType ? `:${sym.returnType}` : "";
-    const prefix = sym.async ? "async " : "";
-    return `${prefix}function(${params})${ret}`;
+  if (sym.type === "function") {
+    if (Array.isArray(sym.params)) {
+      const params = sym.params
+        .map((p) => `${p.type || "?"}${p.optional ? "?" : ""}${p.rest ? "..." : ""}`)
+        .join(",");
+      const ret = sym.returnType ? `:${sym.returnType}` : "";
+      const prefix = sym.async ? "async " : "";
+      return `${prefix}function(${params})${ret}`;
+    }
+    return `function(${sym.paramCount ?? "?"})`; // 旧数据（仅 paramCount）回退
   }
-  return `function(${sym.paramCount ?? "?"})`; // 旧数据（仅 paramCount）回退
+  // type/interface 字段签名：type{字段:类型?,...}，字段变化才触发 modified（M3a-2）
+  if (sym.type === "type" && Array.isArray(sym.fields) && sym.fields.length) {
+    const fields = sym.fields
+      .map((f) => `${f.name}:${f.type || "?"}${f.optional ? "?" : ""}`)
+      .join(",");
+    return `type{${fields}}`;
+  }
+  // type 别名签名：type=目标类型，目标类型变化才触发 modified（M3a-2）
+  if (sym.type === "type" && sym.aliasType) {
+    return `type=${sym.aliasType}`;
+  }
+  return sym.type;
 }
 
 /** 对比某文件 base/head 的导出符号，输出变更符号列表（added / removed / modified） */
@@ -266,6 +320,7 @@ module.exports = {
   md5,
   extractName,
   typeToString,
+  extractFields,
   nodeKind,
   signature,
   parseFile,

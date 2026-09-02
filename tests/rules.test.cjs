@@ -3,7 +3,12 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { runRules, classifyFunctionChange, containsAny } = require("../src/worker/rules.cjs");
+const {
+  runRules,
+  classifyFunctionChange,
+  classifyTypeFieldChange,
+  containsAny,
+} = require("../src/worker/rules.cjs");
 
 // 辅助构造器
 function fn(params = [], extra = {}) {
@@ -11,6 +16,13 @@ function fn(params = [], extra = {}) {
 }
 function param(type, optional = false) {
   return { type, optional };
+}
+// type/interface 符号构造器
+function typeSym(fields = [], extra = {}) {
+  return { name: "T", type: "type", line: 1, ...(fields.length ? { fields } : {}), ...extra };
+}
+function field(name, type, optional = false) {
+  return { name, type, optional };
 }
 
 test("删除导出：有引用 → high/proven，无引用 → medium/proven", () => {
@@ -169,7 +181,7 @@ test("参数类型：any→具体 收紧 high；具体→any 放宽 low；具体
   );
 });
 
-test("非函数符号修改（type/class 字段级）→ low/uncertain", () => {
+test("非函数符号修改且无字段（纯 type 别名/class/variable）→ low/uncertain", () => {
   const oldSym = { name: "Config", type: "type", line: 1 };
   const newSym = { name: "Config", type: "type", line: 1 };
   assert.deepEqual(runRules({ changeType: "modified", oldSymbol: oldSym, newSymbol: newSym }, 2), {
@@ -237,4 +249,179 @@ test("containsAny 识别 any 参数与返回类型", () => {
   assert.equal(containsAny(fn([], { returnType: "any" })), true);
   assert.equal(containsAny(fn([param("string")])), false);
   assert.equal(containsAny(null), false);
+});
+
+// ===== M3a-2：type/interface 字段级规则 =====
+
+test("删除字段 → high/proven", () => {
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("name", "string"), field("age", "number")]),
+        newSymbol: typeSym([field("name", "string")]),
+      },
+      2,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+});
+
+test("新增必填字段 → high/proven；新增可选字段 → low/proven", () => {
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("name", "string")]),
+        newSymbol: typeSym([field("name", "string"), field("age", "number")]),
+      },
+      1,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("name", "string")]),
+        newSymbol: typeSym([field("name", "string"), field("age", "number", true)]),
+      },
+      1,
+    ),
+    { severity: "low", confidence: "proven" },
+  );
+});
+
+test("字段重命名（删旧+增新）→ high/proven", () => {
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("fullName", "string")]),
+        newSymbol: typeSym([field("name", "string")]),
+      },
+      1,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+});
+
+test("字段可选↔必填：optional→required → high，required→optional → low", () => {
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("age", "number", true)]),
+        newSymbol: typeSym([field("age", "number", false)]),
+      },
+      1,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("age", "number", false)]),
+        newSymbol: typeSym([field("age", "number", true)]),
+      },
+      1,
+    ),
+    { severity: "low", confidence: "proven" },
+  );
+});
+
+test("字段类型：any→具体 收紧 high；具体→any 放宽 low；具体→具体 不明 heuristic", () => {
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("v", "any")]),
+        newSymbol: typeSym([field("v", "string")]),
+      },
+      1,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("v", "string")]),
+        newSymbol: typeSym([field("v", "any")]),
+      },
+      1,
+    ),
+    { severity: "low", confidence: "proven" },
+  );
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([field("v", "string")]),
+        newSymbol: typeSym([field("v", "number")]),
+      },
+      1,
+    ),
+    { severity: "medium", confidence: "heuristic" },
+  );
+});
+
+test("type 别名（无字段）改成对象字面量（有字段）→ 按新增字段定级", () => {
+  // type X = string  →  type X = { name: string }（新增必填字段）
+  assert.deepEqual(
+    runRules(
+      {
+        changeType: "modified",
+        oldSymbol: typeSym([]),
+        newSymbol: typeSym([field("name", "string")]),
+      },
+      1,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+});
+
+test("classifyTypeFieldChange 直接分类", () => {
+  assert.equal(
+    classifyTypeFieldChange(typeSym([field("a", "string")]), typeSym([field("a", "string"), field("b", "number")])),
+    "addedRequiredField",
+  );
+  assert.equal(
+    classifyTypeFieldChange(typeSym([field("a", "string")]), typeSym([])),
+    "removedField",
+  );
+  assert.equal(
+    classifyTypeFieldChange(typeSym([field("a", "string", true)]), typeSym([field("a", "string", false)])),
+    "fieldOptionalToRequired",
+  );
+  assert.equal(
+    classifyTypeFieldChange(typeSym([field("a", "string")]), typeSym([field("a", "number")])),
+    "fieldTypeUnclear",
+  );
+});
+
+test("type 别名目标类型变化：any→具体 收紧 high；具体→any 放宽 low；具体→具体 heuristic", () => {
+  const aliasSym = (aliasType) => ({ name: "X", type: "type", aliasType });
+  assert.deepEqual(
+    runRules(
+      { changeType: "modified", oldSymbol: aliasSym("any"), newSymbol: aliasSym("string") },
+      1,
+    ),
+    { severity: "high", confidence: "proven" },
+  );
+  assert.deepEqual(
+    runRules(
+      { changeType: "modified", oldSymbol: aliasSym("string"), newSymbol: aliasSym("any") },
+      1,
+    ),
+    { severity: "low", confidence: "proven" },
+  );
+  assert.deepEqual(
+    runRules(
+      { changeType: "modified", oldSymbol: aliasSym("string"), newSymbol: aliasSym("number") },
+      1,
+    ),
+    { severity: "medium", confidence: "heuristic" },
+  );
 });

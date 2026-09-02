@@ -60,6 +60,44 @@ function classifyFunctionChange(oldSym, newSym) {
   return "unknown"; // 理论不会到（diffSymbols 仅在签名变时产出 modified）
 }
 
+/**
+ * 分类 type/interface 字段变更（M3a-2）：对比 old/new 的 fields（按 name 对齐），
+ * 返回变更类型标签，供查表定级。判据与函数参数同构：删字段/增必填=breaking，增可选/放宽=兼容。
+ * 字段重命名会被识别为「删旧字段 + 增新字段」→ removedField（high）。
+ */
+function classifyTypeFieldChange(oldSym, newSym) {
+  const of = oldSym.fields || [];
+  const nf = newSym.fields || [];
+  const oldMap = new Map(of.map((f) => [f.name, f]));
+  const newMap = new Map(nf.map((f) => [f.name, f]));
+
+  // 字段增删优先（含重命名：删旧 + 增新，先命中 removedField）
+  const removed = of.filter((f) => !newMap.has(f.name));
+  const added = nf.filter((f) => !oldMap.has(f.name));
+  if (removed.length > 0) return "removedField";
+  if (added.length > 0) {
+    return added.every((f) => f.optional) ? "addedOptionalField" : "addedRequiredField";
+  }
+
+  // 字段集相同，逐个对比 optional / type
+  for (const f of nf) {
+    const oldF = oldMap.get(f.name);
+    if (!oldF) continue; // 理论不会（added 已处理）
+    if (!!oldF.optional !== !!f.optional) {
+      return f.optional ? "fieldRequiredToOptional" : "fieldOptionalToRequired";
+    }
+    const ot = oldF.type || "";
+    const nt = f.type || "";
+    if (ot !== nt) {
+      if (ot === "any" && nt !== "any") return "fieldTypeNarrowed"; // any→具体 = 收紧
+      if (ot !== "any" && nt === "any") return "fieldTypeWidened"; // 具体→any = 放宽
+      return "fieldTypeUnclear"; // 具体→具体，方向不明
+    }
+  }
+
+  return "unknown";
+}
+
 // 规则表：变更类型 -> { severity, confidence }
 const RULE_TABLE = {
   asyncChanged:            { severity: "high",   confidence: "proven" },
@@ -72,6 +110,15 @@ const RULE_TABLE = {
   paramTypeNarrowed:       { severity: "high",   confidence: "proven" },
   paramTypeWidened:        { severity: "low",    confidence: "proven" },
   paramTypeUnclear:        { severity: "medium", confidence: "heuristic" },
+  // type/interface 字段级（M3a-2）：判据与函数参数同构
+  removedField:            { severity: "high",   confidence: "proven" },
+  addedRequiredField:      { severity: "high",   confidence: "proven" },
+  addedOptionalField:      { severity: "low",    confidence: "proven" },
+  fieldOptionalToRequired: { severity: "high",   confidence: "proven" },
+  fieldRequiredToOptional: { severity: "low",    confidence: "proven" },
+  fieldTypeNarrowed:       { severity: "high",   confidence: "proven" },
+  fieldTypeWidened:        { severity: "low",    confidence: "proven" },
+  fieldTypeUnclear:        { severity: "medium", confidence: "heuristic" },
   unknown:                 { severity: "low",    confidence: "uncertain" },
 };
 
@@ -97,14 +144,30 @@ function runRules(cs, impactedCount) {
       ? { severity: "medium", confidence: "proven" }
       : { severity: "low", confidence: "proven" };
   } else {
-    // modified：仅函数符号可结构化判断，type/class 字段级暂归 uncertain（M3a-2 补）
+    // modified：函数 → 函数签名规则；type/interface → 字段级规则（M3a-2）；其余归 uncertain
     const oldSym = cs.oldSymbol || {};
     const newSym = cs.newSymbol || {};
-    if (oldSym.type !== "function" || newSym.type !== "function") {
-      result = { severity: "low", confidence: "uncertain" };
-    } else {
+    if (oldSym.type === "function" && newSym.type === "function") {
       const label = classifyFunctionChange(oldSym, newSym);
       result = RULE_TABLE[label] || RULE_TABLE.unknown;
+    } else if (oldSym.type === "type" && newSym.type === "type") {
+      const hasFields = (s) => Array.isArray(s.fields) && s.fields.length > 0;
+      if (hasFields(oldSym) || hasFields(newSym)) {
+        const label = classifyTypeFieldChange(oldSym, newSym);
+        result = RULE_TABLE[label] || RULE_TABLE.unknown;
+      } else if (oldSym.aliasType || newSym.aliasType) {
+        // type 别名目标类型变化：复用字段级「收窄/放宽/不明」规则（语义同构）
+        const ot = oldSym.aliasType || "";
+        const nt = newSym.aliasType || "";
+        if (ot !== "any" && nt === "any") result = RULE_TABLE.fieldTypeWidened;
+        else if (ot === "any" && nt !== "any") result = RULE_TABLE.fieldTypeNarrowed;
+        else result = RULE_TABLE.fieldTypeUnclear;
+      } else {
+        // 无字段无别名的 type 符号归 uncertain 交 AI
+        result = { severity: "low", confidence: "uncertain" };
+      }
+    } else {
+      result = { severity: "low", confidence: "uncertain" };
     }
   }
 
@@ -117,4 +180,4 @@ function runRules(cs, impactedCount) {
   return result;
 }
 
-module.exports = { runRules, classifyFunctionChange, containsAny };
+module.exports = { runRules, classifyFunctionChange, classifyTypeFieldChange, containsAny };
