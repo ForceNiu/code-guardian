@@ -6,6 +6,7 @@ import Link from "next/link";
 import StatusSteps from "@/components/StatusSteps";
 import RiskSummary from "@/components/RiskSummary";
 import ImpactTable from "@/components/ImpactTable";
+import DiffViewer from "@/components/DiffViewer";
 import type { AnalysisResult } from "@/lib/types";
 
 type TaskDetail = {
@@ -33,6 +34,7 @@ export default function TaskDetailPage() {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let es: EventSource | null = null;
 
     async function load() {
       try {
@@ -41,18 +43,53 @@ export default function TaskDetailPage() {
         const data = await res.json();
         if (cancelled) return;
         setTask(data.task);
-        if (RUNNING.has(data.task.status)) {
-          timer = setTimeout(load, 2000);
-        }
+        // 仍在运行 → 尝试建立 SSE 实时推送；已终止则无需监听
+        if (RUNNING.has(data.task.status)) connectSSE();
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     }
 
+    function connectSSE() {
+      if (es) return; // 已建立，避免重复连接
+      es = new EventSource(`/api/tasks/${params.id}/stream`);
+
+      es.onmessage = (event) => {
+        let data: { type?: string; status?: string; errorMessage?: string } = {};
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        if (data.type === "status") {
+          if (data.status === "done" || data.status === "failed") {
+            // 终止态：拉完整结果（含报告），关闭 SSE
+            es?.close();
+            es = null;
+            void load();
+          } else if (data.status) {
+            // 中间态：乐观更新状态徽标，不用等下一轮
+            setTask((prev) => (prev ? { ...prev, status: data.status! } : prev));
+          }
+        } else if (data.type === "connected") {
+          // 连接建立：补一次检查，防「连接瞬间任务恰好 done 错过事件」的竞态
+          void load();
+        }
+      };
+
+      es.onerror = () => {
+        // SSE 断开/失败（沙箱 dev 环境常见）→ 降级为轮询兜底
+        es?.close();
+        es = null;
+        if (!timer) timer = setInterval(() => void load(), 2000);
+      };
+    }
+
     void load();
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
+      if (timer) clearInterval(timer);
+      if (es) es.close();
     };
   }, [params.id]);
 
@@ -162,6 +199,14 @@ export default function TaskDetailPage() {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {r.diffs && r.diffs.length > 0 && (
+            <div className="card">
+              <h2>代码 Diff</h2>
+              <p className="desc">变更文件的 base（左）与 head（右）逐行对比。</p>
+              <DiffViewer diffs={r.diffs} />
             </div>
           )}
         </>

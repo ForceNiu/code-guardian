@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import { runAnalysis } from "@/worker/run-analysis";
 import { persistSymbolTable, readSymbolCache } from "./persist";
 import { enrichUncertain } from "./ai/enrich";
+import { getEventBus } from "./events";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
 const POLL_INTERVAL_MS = 5000; // 每 5 秒轮询一次
@@ -56,6 +57,9 @@ async function tick() {
     });
     if (claimed.count === 0) continue;
 
+    // M4 SSE：认领成功 → 状态 pending→parsing，广播给订阅的报告页
+    getEventBus().publish(task.id, { status: "parsing" });
+
     running++;
     void processTask(task).finally(() => {
       running--;
@@ -70,12 +74,14 @@ async function processTask(task: Task) {
       where: { id: task.id },
       data: { status: "failed", errorMessage: "关联仓库不存在" },
     });
+    getEventBus().publish(task.id, { status: "failed", errorMessage: "关联仓库不存在" });
     return;
   }
 
   const workdir = path.join(process.cwd(), ".cache", "repos", task.repoId);
   try {
     await prisma.task.update({ where: { id: task.id }, data: { status: "analyzing" } });
+    getEventBus().publish(task.id, { status: "analyzing" });
 
     // 增量缓存：先读上次分析结果，未变更文件跳过重解析
     const cache = await readSymbolCache(task.repoId);
@@ -93,6 +99,7 @@ async function processTask(task: Task) {
     await enrichUncertain(output.result);
 
     await prisma.task.update({ where: { id: task.id }, data: { status: "reporting" } });
+    getEventBus().publish(task.id, { status: "reporting" });
 
     await persistSymbolTable(task.repoId, output.symbolTable);
 
@@ -100,6 +107,7 @@ async function processTask(task: Task) {
       where: { id: task.id },
       data: { status: "done", result: output.result as object },
     });
+    getEventBus().publish(task.id, { status: "done" });
     console.log(
       `[scheduler] 任务 ${task.id} 完成：${output.result.summary.changedSymbolCount} 个符号变更，` +
         `${output.result.summary.high} 高危 / ${output.result.summary.medium} 中危 / ${output.result.summary.low} 低危`,
@@ -110,6 +118,7 @@ async function processTask(task: Task) {
       where: { id: task.id },
       data: { status: "failed", errorMessage: message },
     });
+    getEventBus().publish(task.id, { status: "failed", errorMessage: message });
     console.error(`[scheduler] 任务 ${task.id} 失败:`, err);
   }
 }

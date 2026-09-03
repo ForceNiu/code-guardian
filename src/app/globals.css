@@ -165,3 +165,29 @@ textarea { resize: vertical; min-height: 72px; font-family: ui-monospace, SFMono
 .muted { color: var(--muted); }
 .section-title { font-size: 13px; font-weight: 600; margin: 20px 0 10px; }
 .back { display: inline-block; margin-bottom: 12px; font-size: 13px; }
+
+/* M4 Monaco Diff 视图 */
+.diff-viewer { display: grid; grid-template-columns: 220px 1fr; gap: 12px; min-height: 520px; }
+.diff-file-list {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 560px; overflow-y: auto; padding: 4px;
+  background: var(--surface-2); border-radius: var(--radius);
+}
+.diff-file {
+  display: flex; align-items: center; gap: 6px; text-align: left;
+  padding: 6px 8px; border-radius: 6px; border: none; background: transparent;
+  color: var(--text); cursor: pointer; font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.diff-file:hover { background: var(--surface); }
+.diff-file.active { background: var(--brand-soft); }
+.diff-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-pane { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.diff-pane-head {
+  padding: 8px 12px; font-size: 12px; background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 720px) {
+  .diff-viewer { grid-template-columns: 1fr; }
+  .diff-file-list { max-height: 160px; }
+}
