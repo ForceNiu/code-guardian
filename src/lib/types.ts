@@ -14,6 +14,13 @@ export interface FieldInfo {
   optional: boolean; // 是否可选（age?: number）
 }
 
+/** class 的单个成员（M3a-2 可见性规则的结构化原料） */
+export interface ClassMemberInfo {
+  name: string; // 成员名（ES 私有字段带 # 前缀）
+  visibility: "public" | "protected" | "private"; // 可见性（无显式标注默认 public）
+  kind: "method" | "property"; // 方法 or 属性
+}
+
 /** 单个导出符号 */
 export interface SymbolInfo {
   name: string;
@@ -25,6 +32,9 @@ export interface SymbolInfo {
   async?: boolean; // 是否 async 函数（函数才有）
   fields?: FieldInfo[]; // type/interface 字段细节（M3a-2 字段级原料，type 才有）
   aliasType?: string; // type 别名目标类型文本（如 "string" / "SomeType"，非对象字面量的 type 别名才有）
+  localName?: string; // reexport 的 local 绑定名（export { x as y } 的 x，重命名导出识别用）
+  enumMembers?: string[]; // enum 成员名列表（按声明顺序，M3a-2 enum 规则原料）
+  classMembers?: ClassMemberInfo[]; // class 成员（name/visibility/kind，M3a-2 可见性规则原料）
 }
 
 /** 单个 import 声明 */
@@ -41,7 +51,9 @@ export type ChangeStatus = "added" | "modified" | "deleted";
 export interface ChangedSymbol {
   file: string;
   symbol: string;
-  changeType: "added" | "removed" | "modified";
+  changeType: "added" | "removed" | "modified" | "renamed";
+  /** changeType="renamed" 时的目标导出名（symbol 为旧导出名） */
+  newName?: string;
   oldSignature?: string;
   newSignature?: string;
   /** M3：结构化符号信息，供规则引擎做精细判断（added 只有 newSymbol，removed 只有 oldSymbol） */

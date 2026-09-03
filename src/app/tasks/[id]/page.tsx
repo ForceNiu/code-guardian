@@ -23,7 +23,7 @@ type TaskDetail = {
 
 const RUNNING = new Set(["pending", "parsing", "analyzing", "reporting"]);
 
-const CHANGE_LABEL: Record<string, string> = { added: "新增", removed: "删除", modified: "修改" };
+const CHANGE_LABEL: Record<string, string> = { added: "新增", removed: "删除", modified: "修改", renamed: "重命名" };
 
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();

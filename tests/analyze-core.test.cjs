@@ -394,3 +394,176 @@ test("diffSymbols 识别 type 字段变更（modified，携带 old/new 结构化
     },
   ]);
 });
+
+test("parseFile 提取 reexport 的导出名 + local 绑定映射", () => {
+  const { exports } = parseFile(`
+    const a = 1;
+    const b = 2;
+    export { a as x, b };
+    export { a as y } from "./other";
+  `);
+  const x = exports.find((s) => s.name === "x");
+  const b2 = exports.find((s) => s.name === "b");
+  const y = exports.find((s) => s.name === "y");
+  assert.equal(x.type, "reexport");
+  assert.equal(x.localName, "a"); // export { a as x }：导出名 x，local 绑定 a
+  assert.equal(b2.type, "reexport");
+  assert.equal(b2.localName, "b"); // export { b } 无别名：local === exported
+  assert.equal(y.type, "reexport");
+  assert.equal(y.localName, "a"); // export { a as y } from './other' 同样记 local 映射
+});
+
+test("signature reexport 体现 local 绑定（导出名变化走配对，local 变化走 modified）", () => {
+  assert.equal(signature({ type: "reexport", name: "y", localName: "x" }), "reexport:x");
+  assert.equal(signature({ type: "reexport", name: "x", localName: "x" }), "reexport:x");
+});
+
+test("diffSymbols 识别重命名导出（renamed：导出名变但 local 绑定相同）", () => {
+  const file = "src/index.ts";
+  const o = { name: "oldName", type: "reexport", localName: "x", line: 1 };
+  const n = { name: "newName", type: "reexport", localName: "x", line: 1 };
+  assert.deepEqual(diffSymbols(file, [o], [n]), [
+    {
+      file,
+      symbol: "oldName",
+      newName: "newName",
+      localName: "x",
+      changeType: "renamed",
+      oldSignature: "reexport:x",
+      newSignature: "reexport:x",
+      oldSymbol: o,
+      newSymbol: n,
+      line: 1,
+    },
+  ]);
+});
+
+test("diffSymbols 不误配对：removed reexport 无同名 local 的 added 时保留为 removed", () => {
+  const file = "src/index.ts";
+  const o = { name: "gone", type: "reexport", localName: "x", line: 1 };
+  const n = { name: "other", type: "reexport", localName: "w", line: 1 };
+  const result = diffSymbols(file, [o], [n]);
+  assert.equal(result.length, 2);
+  assert.ok(result.some((c) => c.changeType === "removed" && c.symbol === "gone"));
+  assert.ok(result.some((c) => c.changeType === "added" && c.symbol === "other"));
+});
+
+test("nodeKind 提取 enum 成员（按声明顺序）", () => {
+  const decl = {
+    type: "TSEnumDeclaration",
+    members: [
+      { type: "TSEnumMember", id: { type: "Identifier", name: "Red" } },
+      { type: "TSEnumMember", id: { type: "Identifier", name: "Green" } },
+    ],
+  };
+  assert.deepEqual(nodeKind(decl), { type: "enum", enumMembers: ["Red", "Green"] });
+  assert.deepEqual(nodeKind({ type: "TSEnumDeclaration", members: [] }), { type: "enum" });
+});
+
+test("parseFile 提取 enum 成员", () => {
+  const { exports } = parseFile(`export enum Color { Red, Green = 2, Blue }`);
+  const color = exports.find((s) => s.name === "Color");
+  assert.equal(color.type, "enum");
+  assert.deepEqual(color.enumMembers, ["Red", "Green", "Blue"]);
+});
+
+test("signature enum 签名", () => {
+  assert.equal(signature({ type: "enum", enumMembers: ["Red", "Green"] }), "enum{Red,Green}");
+});
+
+test("diffSymbols 识别 enum 成员变更（modified）", () => {
+  const file = "src/color.ts";
+  const o = { name: "Color", type: "enum", line: 1, enumMembers: ["Red", "Green", "Blue"] };
+  const n = { name: "Color", type: "enum", line: 1, enumMembers: ["Red", "Green"] };
+  assert.deepEqual(diffSymbols(file, [o], [n]), [
+    {
+      file,
+      symbol: "Color",
+      changeType: "modified",
+      oldSignature: "enum{Red,Green,Blue}",
+      newSignature: "enum{Red,Green}",
+      oldSymbol: o,
+      newSymbol: n,
+      line: 1,
+    },
+  ]);
+});
+
+test("nodeKind 提取 class 成员（方法/属性 + 可见性，按 name 排序）", () => {
+  const decl = {
+    type: "ClassDeclaration",
+    body: {
+      body: [
+        { type: "ClassMethod", key: { name: "render" } },
+        { type: "ClassMethod", key: { name: "helper" }, accessibility: "private" },
+        { type: "ClassProperty", key: { name: "count" }, accessibility: "protected" },
+      ],
+    },
+  };
+  assert.deepEqual(nodeKind(decl), {
+    type: "class",
+    classMembers: [
+      { name: "count", visibility: "protected", kind: "property" },
+      { name: "helper", visibility: "private", kind: "method" },
+      { name: "render", visibility: "public", kind: "method" },
+    ],
+  });
+  // 无成员 class 不存 classMembers
+  assert.deepEqual(nodeKind({ type: "ClassDeclaration", body: { body: [] } }), { type: "class" });
+});
+
+test("parseFile 提取 class 成员", () => {
+  const { exports } = parseFile(`
+    export class Widget {
+      render() {}
+      private helper() {}
+      protected count = 0;
+    }
+  `);
+  const w = exports.find((s) => s.name === "Widget");
+  assert.equal(w.type, "class");
+  assert.deepEqual(w.classMembers, [
+    { name: "count", visibility: "protected", kind: "property" },
+    { name: "helper", visibility: "private", kind: "method" },
+    { name: "render", visibility: "public", kind: "method" },
+  ]);
+});
+
+test("signature class 签名（成员:可见性，方法加 ()）", () => {
+  const sym = {
+    type: "class",
+    classMembers: [
+      { name: "count", visibility: "private", kind: "property" },
+      { name: "render", visibility: "public", kind: "method" },
+    ],
+  };
+  assert.equal(signature(sym), "class{count:private,render():public}");
+});
+
+test("diffSymbols 识别 class 成员变更（modified）", () => {
+  const file = "src/widget.ts";
+  const o = {
+    name: "Widget",
+    type: "class",
+    line: 1,
+    classMembers: [{ name: "render", visibility: "public", kind: "method" }],
+  };
+  const n = {
+    name: "Widget",
+    type: "class",
+    line: 1,
+    classMembers: [{ name: "render", visibility: "private", kind: "method" }],
+  };
+  assert.deepEqual(diffSymbols(file, [o], [n]), [
+    {
+      file,
+      symbol: "Widget",
+      changeType: "modified",
+      oldSignature: "class{render():public}",
+      newSignature: "class{render():private}",
+      oldSymbol: o,
+      newSymbol: n,
+      line: 1,
+    },
+  ]);
+});

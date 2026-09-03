@@ -98,6 +98,54 @@ function classifyTypeFieldChange(oldSym, newSym) {
   return "unknown";
 }
 
+/**
+ * 分类 enum 成员变更（M3a-2）：对比 old/new 的 enumMembers（成员名列表，按声明顺序）。
+ * 删成员（含重命名=删旧+增新）→ removedEnumMember（high）；增成员 → addedEnumMember（low）。
+ * 成员集相同（含顺序变化，数值 enum 隐式值可能变）→ unknown 交 AI。
+ */
+function classifyEnumChange(oldSym, newSym) {
+  const om = oldSym.enumMembers || [];
+  const nm = newSym.enumMembers || [];
+  const oldSet = new Set(om);
+  const newSet = new Set(nm);
+  const removed = om.filter((m) => !newSet.has(m));
+  const added = nm.filter((m) => !oldSet.has(m));
+  if (removed.length > 0) return "removedEnumMember"; // 含重命名：删旧 + 增新
+  if (added.length > 0) return "addedEnumMember";
+  return "unknown"; // 成员集相同（含顺序变化）→ 交 AI
+}
+
+/** 可见性等级：数值越大越"私有"（用于判断收紧/放宽方向） */
+const VIS_LEVEL = { public: 0, protected: 1, private: 2 };
+
+/**
+ * 分类 class 成员变更（M3a-2）：对比 old/new 的 classMembers（成员名 + 可见性 + kind）。
+ * 删成员（含重命名=删旧+增新）→ removedClassMember（high）；增成员 → addedClassMember（low）；
+ * 可见性收紧（public→private/protected）→ memberVisibilityNarrowed（high）；放宽 → memberVisibilityWidened（low）；
+ * 方法↔属性 kind 变 → memberKindChanged（high，调用方式变）。
+ */
+function classifyClassChange(oldSym, newSym) {
+  const om = oldSym.classMembers || [];
+  const nm = newSym.classMembers || [];
+  const oldMap = new Map(om.map((m) => [m.name, m]));
+  const newMap = new Map(nm.map((m) => [m.name, m]));
+
+  const removed = om.filter((m) => !newMap.has(m.name));
+  const added = nm.filter((m) => !oldMap.has(m.name));
+  if (removed.length > 0) return "removedClassMember"; // 含重命名：删旧 + 增新
+  if (added.length > 0) return "addedClassMember";
+
+  for (const m of nm) {
+    const oldM = oldMap.get(m.name);
+    if (!oldM) continue;
+    if (oldM.kind !== m.kind) return "memberKindChanged"; // 方法↔属性
+    const ol = VIS_LEVEL[oldM.visibility] ?? 0;
+    const nl = VIS_LEVEL[m.visibility] ?? 0;
+    if (ol !== nl) return nl > ol ? "memberVisibilityNarrowed" : "memberVisibilityWidened";
+  }
+  return "unknown";
+}
+
 // 规则表：变更类型 -> { severity, confidence }
 const RULE_TABLE = {
   asyncChanged:            { severity: "high",   confidence: "proven" },
@@ -119,6 +167,15 @@ const RULE_TABLE = {
   fieldTypeNarrowed:       { severity: "high",   confidence: "proven" },
   fieldTypeWidened:        { severity: "low",    confidence: "proven" },
   fieldTypeUnclear:        { severity: "medium", confidence: "heuristic" },
+  // enum 成员（M3a-2）：判据与函数参数/字段同构
+  removedEnumMember:       { severity: "high",   confidence: "proven" },
+  addedEnumMember:         { severity: "low",    confidence: "proven" },
+  // class 成员（M3a-2）：删/收紧=breaking，增/放宽=兼容
+  removedClassMember:       { severity: "high",  confidence: "proven" },
+  addedClassMember:         { severity: "low",   confidence: "proven" },
+  memberKindChanged:        { severity: "high",  confidence: "proven" },
+  memberVisibilityNarrowed: { severity: "high",  confidence: "proven" },
+  memberVisibilityWidened:  { severity: "low",   confidence: "proven" },
   unknown:                 { severity: "low",    confidence: "uncertain" },
 };
 
@@ -132,7 +189,10 @@ function runRules(cs, impactedCount) {
 
   let result;
 
-  if (changeType === "removed") {
+  if (changeType === "renamed") {
+    // 重命名导出（export { x as y } → export { x as z }）：删了旧导出名，下游 import 旧名的崩了 → high/proven
+    result = { severity: "high", confidence: "proven" };
+  } else if (changeType === "removed") {
     // 删除导出：有引用 → high；无引用 → medium（均 proven）
     result =
       impactedCount > 0
@@ -166,6 +226,12 @@ function runRules(cs, impactedCount) {
         // 无字段无别名的 type 符号归 uncertain 交 AI
         result = { severity: "low", confidence: "uncertain" };
       }
+    } else if (oldSym.type === "enum" && newSym.type === "enum") {
+      const label = classifyEnumChange(oldSym, newSym);
+      result = RULE_TABLE[label] || RULE_TABLE.unknown;
+    } else if (oldSym.type === "class" && newSym.type === "class") {
+      const label = classifyClassChange(oldSym, newSym);
+      result = RULE_TABLE[label] || RULE_TABLE.unknown;
     } else {
       result = { severity: "low", confidence: "uncertain" };
     }
@@ -180,4 +246,4 @@ function runRules(cs, impactedCount) {
   return result;
 }
 
-module.exports = { runRules, classifyFunctionChange, classifyTypeFieldChange, containsAny };
+module.exports = { runRules, classifyFunctionChange, classifyTypeFieldChange, classifyEnumChange, classifyClassChange, containsAny };

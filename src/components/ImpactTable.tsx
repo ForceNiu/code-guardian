@@ -12,6 +12,7 @@ const CHANGE_LABEL: Record<string, string> = {
   added: "新增",
   removed: "删除",
   modified: "修改",
+  renamed: "重命名",
 };
 
 export default function ImpactTable({ edges }: { edges: ImpactEdge[] }) {
