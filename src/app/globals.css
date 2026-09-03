@@ -117,6 +117,33 @@ textarea { resize: vertical; min-height: 72px; font-family: ui-monospace, SFMono
 .badge.low { background: var(--low-soft); color: var(--low); }
 .badge.neutral { background: var(--surface-2); color: var(--text-2); }
 
+/* 置信度徽标（M3b 双轨判定来源） */
+.badge.proven { background: var(--low-soft); color: var(--low); }
+.badge.heuristic { background: var(--medium-soft); color: var(--medium); }
+.badge.uncertain { background: var(--surface-2); color: var(--text-2); border: 1px dashed var(--border); }
+
+/* 判定来源小标记：规则引擎 / AI 语义引擎 */
+.engine-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  white-space: nowrap;
+}
+.engine-tag.rule { background: var(--surface-2); color: var(--text-2); }
+.engine-tag.ai { background: var(--brand-soft); color: var(--brand); }
+
+/* AI 修复建议（影响链路表格内的整行建议） */
+.suggestion-row td {
+  background: var(--brand-soft);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+}
+.suggestion-line {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 12px; color: var(--text);
+}
+.suggestion-line .mark { color: var(--brand); font-weight: 700; flex: none; }
+.suggestion-line .txt { color: var(--text-2); }
+
 .tag {
   display: inline-block; padding: 1px 8px; border-radius: 6px;
   font-size: 11px; font-weight: 600; background: var(--surface-2); color: var(--text-2);
