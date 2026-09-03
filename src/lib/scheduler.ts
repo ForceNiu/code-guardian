@@ -3,6 +3,7 @@ import type { Task } from "@prisma/client";
 import { prisma } from "./prisma";
 import { runAnalysis } from "@/worker/run-analysis";
 import { persistSymbolTable, readSymbolCache } from "./persist";
+import { enrichUncertain } from "./ai/enrich";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
 const POLL_INTERVAL_MS = 5000; // 每 5 秒轮询一次
@@ -87,6 +88,9 @@ async function processTask(task: Task) {
       workdir,
       cache,
     });
+
+    // M3b：规则引擎判为 uncertain 的变更送 AI 语义引擎二次判定（无 key / 失败自动降级）
+    await enrichUncertain(output.result);
 
     await prisma.task.update({ where: { id: task.id }, data: { status: "reporting" } });
 

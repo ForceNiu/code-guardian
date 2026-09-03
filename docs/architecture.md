@@ -59,6 +59,10 @@ code-guardian/
 │   │   ├── scheduler.ts       # 轮询调度器 + 信号量 + 原子认领
 │   │   ├── enqueue.ts         # 入队（靠唯一索引防重）
 │   │   ├── persist.ts         # 符号缓存落库
+│   │   ├── ai/                # M3b AI 语义引擎
+│   │   │   ├── deepseek.ts       # DeepSeek 客户端（HTTP 代理 CONNECT 隧道）
+│   │   │   ├── semantic-graph.ts # LangGraph 4 节点管线（重述→检索→预测→建议）
+│   │   │   └── enrich.ts         # uncertain 变更集成层（合并判定回 impactChain）
 │   │   └── types.ts           # Worker ↔ 主线程共享类型
 │   ├── worker/
 │   │   ├── analyze.worker.cjs # Worker：git + AST + 反向索引 + 影响链路
@@ -134,10 +138,8 @@ Webhook / 手动触发
 
 ---
 
-## 8. 双轨审查引擎（M3 预留设计）
+## 8. 双轨审查引擎（M3）
 
-- **确定性规则引擎**：AST 硬规则捕获高风险变更（0 Token），例：函数参数个数变更→HIGH、删除被引用函数→HIGH、新增 `any`→LOW。
-- **AI 语义引擎**：规则引擎判定为 `UNCERTAIN`（置信度 < 70%）才送入 LangGraph，管线 `问题重述 → 上下文检索 → 影响面预测 → 修复建议` 4 节点。
+- **确定性规则引擎**（`src/worker/rules.cjs`，0 Token）：AST 硬规则捕获高风险变更，输出 `{ severity, confidence }` 三档（`proven`=自身即证据可直接门禁 / `heuristic`=经验判断需人工复核 / `uncertain`=归不了类交 AI）。规则覆盖函数签名 10 类、type/interface 字段 8 类、enum 成员 2 类、class 成员 5 类，外加 renamed/removed/added 三类变更分支，共 27 条查表规则。判据遵循 semver：删 / 收紧 = breaking（high），增 / 放宽 = 兼容（low）。
+- **AI 语义引擎**（`src/lib/ai/`，M3b）：规则引擎判为 `uncertain` 的变更才送入 LangGraph，管线 `问题重述 → 上下文检索 → 影响面预测 → 修复建议` 4 节点，用 DeepSeek 产出 severity/confidence/suggestion 并合并回 impactChain。AI 不可用（无 key / 调用失败）时静默降级，保留原 uncertain 结果，不影响任务成功。
 - **成本**：80% 由规则搞定，AI 只覆盖 20%，月 Token 可控在 $200 内。
-
-> 当前 M1-M2 的 `impactChain[].severity` 用极简启发式（删除+有引用→high / 修改+有引用→medium / 新增→low）占位，M3 会替换为完整规则引擎。
