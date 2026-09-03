@@ -84,6 +84,28 @@ export interface ImpactEdge {
   suggestion?: string; // M3b：AI 语义引擎给出的修复建议（仅 uncertain 变更经 AI 判定后有）
 }
 
+/** M5 CVE 扫描：单个依赖漏洞记录 */
+export interface Vulnerability {
+  package: string; // 包名
+  version: string; // lockfile 锁定的版本
+  severity: "critical" | "high" | "moderate" | "low"; // npm advisory 原始 severity
+  title: string;
+  url: string; // advisory 详情链接（GitHub Advisory）
+  vulnerableVersions: string; // 受影响版本范围，如 "<4.17.21"
+  cvssScore?: number;
+  isDirect: boolean; // 是否项目顶层直接依赖
+}
+
+/** M5 构建体积检测：依赖体积报告 */
+export interface BundleSizeReport {
+  totalBytes: number; // 顶层依赖累计解包体积
+  packageCount: number; // 参与统计的包数
+  largest: { name: string; version: string; bytes: number } | null; // 体积最大单包
+  thresholdBytes: number; // 总依赖体积门禁阈值
+  exceeded: boolean; // 是否超过总阈值
+  packages: { name: string; version: string; bytes: number }[]; // 明细（按体积降序）
+}
+
 /** Worker 输出的完整分析结果 */
 export interface AnalysisResult {
   changedFiles: { path: string; status: ChangeStatus }[];
@@ -91,6 +113,10 @@ export interface AnalysisResult {
   impactChain: ImpactEdge[];
   /** M4 Monaco Diff：变更文件 base/head 全文（老任务无此字段，前端需容错 undefined） */
   diffs?: FileDiff[];
+  /** M5 CVE 扫描：依赖漏洞（扫描失败/无 lockfile 时为 undefined） */
+  vulnerabilities?: Vulnerability[];
+  /** M5 构建体积检测：依赖体积（扫描失败/无 package.json 时为 undefined） */
+  bundleSize?: BundleSizeReport;
   summary: {
     totalFiles: number;
     totalSymbols: number;
