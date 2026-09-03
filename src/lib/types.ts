@@ -73,6 +73,7 @@ export interface ImpactEdge {
   impactedFiles: string[]; // 引用该符号的文件
   severity: "high" | "medium" | "low";
   confidence: Confidence; // M3 规则引擎输出的置信度（供 AI 分流 + 前端标注）
+  suggestion?: string; // M3b：AI 语义引擎给出的修复建议（仅 uncertain 变更经 AI 判定后有）
 }
 
 /** Worker 输出的完整分析结果 */
