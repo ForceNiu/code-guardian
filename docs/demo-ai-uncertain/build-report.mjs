@@ -2,9 +2,7 @@
 // 双击即可在浏览器查看完整链路（不依赖 Next/Neon/dev server）。
 // 用法：node docs/demo-ai-uncertain/build-report.mjs
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
 
-const dir = fileURLToPath(new URL(".", import.meta.url));
 const raw = JSON.parse(fs.readFileSync(new URL("./task-result.json", import.meta.url), "utf8"));
 
 // 内嵌数据（把 < 转义为 \u003c，彻底避免 </script> 破坏标签）

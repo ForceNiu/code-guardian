@@ -3,7 +3,7 @@
 在 MR 合并前自动分析 **「这次改动影响了哪些函数、哪些文件」**，作为合并门禁依据。
 ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **AST 增量分析 + 反向索引** 把影响链路自动算出来。
 
-> 当前进度：**M1（骨架）→ M4（前端联调）已全部完成并合并**。仅剩 **M5 安全门禁**（CVE 扫描 + 构建体积检测 + GitLab 状态互操作）待做。详见 [架构文档](docs/architecture.md) 里程碑部分。
+> 当前进度：**M1（骨架）→ M4（前端联调）已全部完成并合并**。**M5 安全门禁**进行中：CVE 扫描 + 构建体积检测已完成，GitLab 状态回写待做。详见 [架构文档](docs/architecture.md) 里程碑部分。
 
 ---
 
@@ -23,6 +23,7 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 | 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 |
 | Monaco Diff | 新旧文件左右对比，高亮副作用行 |
 | 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 |
+| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值） |
 
 ---
 
@@ -85,7 +86,7 @@ curl -X POST http://localhost:3000/api/webhook \
 ```
 prisma/            schema（5 张表）+ seed
 src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
-src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · 类型
+src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 类型
 src/worker/        Worker 线程（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）
 src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
 fixtures/          演示用 git 仓库

@@ -139,7 +139,7 @@ Webhook / 手动触发
 | **M2 Worker 核心** | git + AST + 导出符号 + 缓存 + 影响链路 | ✅ 已实现（增量缓存命中跳过重解析） |
 | M3 规则引擎 | 27 条 AST 硬规则 + LangGraph 双轨 | ✅ 已实现（确定性规则引擎 + AI 语义引擎） |
 | M4 前端联调 | SSE 实时进度 + Monaco Diff + 任意 head | ✅ 已实现（跳过 AntD，自研轻量 UI） |
-| M5 安全门禁 | CVE 扫描 + 构建体积检测 + GitLab 状态互操作 | ⏳ 待做 |
+| M5 安全门禁 | CVE 扫描 + 构建体积检测 + GitLab 状态互操作 | 🟡 部分完成（CVE + 体积已实现，GitLab 回写待做） |
 
 ---
 
@@ -148,3 +148,43 @@ Webhook / 手动触发
 - **确定性规则引擎**（`src/worker/rules.cjs`，0 Token）：AST 硬规则捕获高风险变更，输出 `{ severity, confidence }` 三档（`proven`=自身即证据可直接门禁 / `heuristic`=经验判断需人工复核 / `uncertain`=归不了类交 AI）。规则覆盖函数签名 10 类、type/interface 字段 8 类、enum 成员 2 类、class 成员 5 类，外加 renamed/removed/added 三类变更分支，共 27 条查表规则。判据遵循 semver：删 / 收紧 = breaking（high），增 / 放宽 = 兼容（low）。
 - **AI 语义引擎**（`src/lib/ai/`，M3b）：规则引擎判为 `uncertain` 的变更才送入 LangGraph，管线 `问题重述 → 上下文检索 → 影响面预测 → 修复建议` 4 节点，用 DeepSeek 产出 severity/confidence/suggestion 并合并回 impactChain。AI 不可用（无 key / 调用失败）时静默降级，保留原 uncertain 结果，不影响任务成功。
 - **成本**：80% 由规则搞定，AI 只覆盖 20%，月 Token 可控在 $200 内。
+
+---
+
+## 9. 安全门禁（M5，部分完成）
+
+> 定位：把「代码副作用」审查扩展到「依赖安全」维度，产出与影响链路并列的第二份门禁报告。当前已完成 CVE 扫描 + 构建体积检测，GitLab 状态回写待做。
+
+### 数据流
+
+```
+scheduler.processTask()
+  └─ runAnalysis(worker)           # AST 影响链路
+  └─ enrichUncertain(result)        # M3b AI 语义判定
+  └─ enrichSecurity(result, workdir) # M5 安全门禁（失败静默降级）
+       ├─ readManifest()            # 读 package.json + package-lock.json 提取依赖清单
+       ├─ scanVulnerabilities()     # 完整依赖树 → npm Bulk Advisory 端点
+       └─ measureBundleSize()       # 顶层依赖 → npm registry 查 unpackedSize
+```
+
+### 依赖清单（`src/lib/security/dependency-manifest.ts`）
+
+- `direct`：`package.json` 的 dependencies + devDependencies（顶层直接依赖），有 lockfile 时版本被精确覆盖
+- `all`：`package-lock.json` 的 `packages` 字段完整依赖树（含传递依赖、scoped、嵌套路径）
+- 非 npm 项目（无 `package.json`）返回 null，安全门禁整段跳过
+
+### CVE 扫描（`src/lib/security/cve-scan.ts`）
+
+- 端点 `POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk`，请求 `{ "包名": ["版本"] }`，返回每个包匹配的 advisory
+- 完整依赖树提交（能发现传递依赖漏洞），`isDirect` 标记是否顶层
+- severity 保留 npm 四档（critical/high/moderate/low），前端映射 badge
+
+### 构建体积检测（`src/lib/security/bundle-size.ts`）
+
+- 顶层依赖逐包查 `GET /{pkg}/{version}` 的 `dist.unpackedSize`（scoped 包 `/` 编码为 `%2F`）
+- 8 并发 + 单包失败静默跳过；累计总体积 + 最大单包
+- 门禁阈值：总依赖 100MB（`exceeded` 布尔）
+
+### 降级策略
+
+与 `enrichUncertain` 同定位——「尽力而为」增强：读清单 / CVE / 体积任一步失败只打日志，任务仍 `done`，只是缺 `vulnerabilities` / `bundleSize` 字段，前端「安全门禁」卡片按需渲染。

@@ -26,6 +26,16 @@ const RUNNING = new Set(["pending", "parsing", "analyzing", "reporting"]);
 
 const CHANGE_LABEL: Record<string, string> = { added: "新增", removed: "删除", modified: "修改", renamed: "重命名" };
 
+// M5 安全门禁：CVE severity（npm 四档）→ 前端 badge 类 / 中文标签
+const SEV_CLASS: Record<string, string> = { critical: "high", high: "high", moderate: "medium", low: "low" };
+const SEV_LABEL: Record<string, string> = { critical: "严重", high: "高危", moderate: "中危", low: "低危" };
+
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -200,6 +210,79 @@ export default function TaskDetailPage() {
                     ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {(r.vulnerabilities || r.bundleSize) && (
+            <div className="card">
+              <h2>安全门禁</h2>
+              <p className="desc">
+                M5 依赖安全检测：CVE 漏洞扫描（npm 官方漏洞库）+ 依赖体积门禁。扫描失败时本卡片缺失、不影响主分析。
+              </p>
+
+              {r.vulnerabilities && (
+                <div>
+                  <div className="section-title">依赖漏洞（CVE）</div>
+                  {r.vulnerabilities.length === 0 ? (
+                    <div className="meta">未发现已知漏洞 ✅</div>
+                  ) : (
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 200 }}>依赖</th>
+                          <th style={{ width: 90 }}>版本</th>
+                          <th style={{ width: 70 }}>严重度</th>
+                          <th>漏洞</th>
+                          <th style={{ width: 110 }}>影响范围</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.vulnerabilities.map((v, i) => (
+                          <tr key={i}>
+                            <td className="mono">
+                              {v.package}
+                              {!v.isDirect && <span className="muted">（传递）</span>}
+                            </td>
+                            <td className="mono">{v.version}</td>
+                            <td>
+                              <span className={`badge ${SEV_CLASS[v.severity] ?? "low"}`}>
+                                {SEV_LABEL[v.severity] ?? "低危"}
+                              </span>
+                            </td>
+                            <td>
+                              <a href={v.url} target="_blank" rel="noreferrer">{v.title}</a>
+                            </td>
+                            <td className="mono muted">{v.vulnerableVersions}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {r.bundleSize && (
+                <div>
+                  <div className="section-title">依赖体积</div>
+                  <div className="meta">
+                    顶层依赖 {r.bundleSize.packageCount} 个 · 总体积{" "}
+                    <strong style={{ color: "var(--text)" }}>{formatBytes(r.bundleSize.totalBytes)}</strong>{" "}
+                    {r.bundleSize.exceeded ? (
+                      <span className="badge high">超过阈值 {formatBytes(r.bundleSize.thresholdBytes)}</span>
+                    ) : (
+                      <span className="badge low">未超阈值 {formatBytes(r.bundleSize.thresholdBytes)}</span>
+                    )}
+                    {r.bundleSize.largest && (
+                      <>
+                        {" "}· 最大单包{" "}
+                        <span className="mono">
+                          {r.bundleSize.largest.name} {formatBytes(r.bundleSize.largest.bytes)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

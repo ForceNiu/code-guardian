@@ -4,6 +4,7 @@ import { prisma } from "./prisma";
 import { runAnalysis } from "@/worker/run-analysis";
 import { persistSymbolTable, readSymbolCache } from "./persist";
 import { enrichUncertain } from "./ai/enrich";
+import { enrichSecurity } from "./security";
 import { getEventBus } from "./events";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
@@ -97,6 +98,9 @@ async function processTask(task: Task) {
 
     // M3b：规则引擎判为 uncertain 的变更送 AI 语义引擎二次判定（无 key / 失败自动降级）
     await enrichUncertain(output.result);
+
+    // M5：安全门禁（CVE 扫描 + 构建体积检测），失败静默降级、不阻断主分析
+    await enrichSecurity(output.result, workdir);
 
     await prisma.task.update({ where: { id: task.id }, data: { status: "reporting" } });
     getEventBus().publish(task.id, { status: "reporting" });
