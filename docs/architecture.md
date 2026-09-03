@@ -66,6 +66,13 @@ code-guardian/
 │   │   │   ├── deepseek.ts       # DeepSeek 客户端（HTTP 代理 CONNECT 隧道）
 │   │   │   ├── semantic-graph.ts # LangGraph 4 节点管线（重述→检索→预测→建议）
 │   │   │   └── enrich.ts         # uncertain 变更集成层（合并判定回 impactChain）
+│   │   ├── security/           # M5 安全门禁
+│   │   │   ├── dependency-manifest.ts # 依赖清单（package.json + lockfile）
+│   │   │   ├── cve-scan.ts           # CVE 扫描（npm Bulk Advisory）
+│   │   │   ├── bundle-size.ts        # 构建体积检测（unpackedSize）
+│   │   │   └── index.ts              # enrichSecurity 集成层
+│   │   ├── status/             # GitLab Commit Status 回写
+│   │   │   └── gitlab-status.ts
 │   │   └── types.ts            # Worker ↔ 主线程共享类型
 │   ├── worker/
 │   │   ├── analyze-core.cjs    # AST 核心：导出符号提取 + 签名 + 字段/别名
@@ -185,6 +192,13 @@ scheduler.processTask()
 - 8 并发 + 单包失败静默跳过；累计总体积 + 最大单包
 - 门禁阈值：总依赖 100MB（`exceeded` 布尔）
 
+### GitLab 状态回写（`src/lib/status/gitlab-status.ts`）
+
+- 入队时从 GitLab MR webhook 提取 `project.id` 存为 `task.gitlabProjectId`，`source` 标记任务来源
+- 任务 `done` / `failed` 后调 GitLab Commit Status API：`POST {host}/api/v4/projects/{projectId}/statuses/{sha}?state=...&name=...`，header `PRIVATE-TOKEN`
+- 状态映射：`done` + high 漏洞 > 0 → `failed`；`done` 无 high → `success`；任务 `failed` → `failed`；其他 → `running`
+- 前置条件不满足（非 gitlab-mr 来源 / 无 projectId / 无 `GITLAB_TOKEN` / gitUrl 非法）时直接跳过返回 false
+
 ### 降级策略
 
-与 `enrichUncertain` 同定位——「尽力而为」增强：读清单 / CVE / 体积任一步失败只打日志，任务仍 `done`，只是缺 `vulnerabilities` / `bundleSize` 字段，前端「安全门禁」卡片按需渲染。
+与 `enrichUncertain` 同定位——「尽力而为」增强：读清单 / CVE / 体积 / GitLab 回写任一步失败只打日志，任务仍 `done`，只是缺 `vulnerabilities` / `bundleSize` 字段或未回写门禁状态，前端「安全门禁」卡片按需渲染。

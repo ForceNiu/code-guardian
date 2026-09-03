@@ -46,17 +46,19 @@ model Repository {
 
 // 表 2：审查任务
 model Task {
-  id           String     @id @default(cuid())
-  repoId       String     @map("repo_id")
-  mrId         String     @map("mr_id")
-  commitSha    String     @map("commit_sha")
-  baseRef      String     @default("") @map("base_ref") // git diff 的基准（分支/tag/commit）
-  headRef      String     @default("") @map("head_ref") // 目标（分支/tag/commit）
-  status       TaskStatus @default(pending)
-  result       Json?      @map("result") // 最终审查报告（影响链路/风险等级）
-  errorMessage String?    @map("error_message")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id              String     @id @default(cuid())
+  repoId          String     @map("repo_id")
+  mrId            String     @map("mr_id")
+  commitSha       String     @map("commit_sha")
+  baseRef         String     @default("") @map("base_ref") // git diff 的基准（分支/tag/commit）
+  headRef         String     @default("") @map("head_ref") // 目标（分支/tag/commit）
+  source          String?    @map("source") // 事件源：gitlab-mr / github-push / github-pr，null=手动触发
+  gitlabProjectId String?    @map("gitlab_project_id") // GitLab project id（仅 gitlab-mr 来源，回写 commit status 用）
+  status          TaskStatus @default(pending)
+  result          Json?      @map("result") // 最终审查报告（影响链路/风险等级）
+  errorMessage    String?    @map("error_message")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
 
   repo      Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
   feedbacks Feedback[]

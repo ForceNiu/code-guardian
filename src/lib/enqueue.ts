@@ -8,6 +8,10 @@ export interface EnqueueInput {
   commitSha: string;
   baseRef?: string;
   headRef?: string;
+  /** 事件源（M5 GitLab 回写判定）：gitlab-mr / github-push / github-pr，缺省=手动触发 */
+  source?: string;
+  /** GitLab project id（仅 gitlab-mr 来源，回写 commit status 用） */
+  gitlabProjectId?: string;
 }
 
 export interface EnqueueResult {
@@ -42,6 +46,8 @@ export async function enqueueTask(input: EnqueueInput): Promise<EnqueueResult> {
         commitSha: input.commitSha,
         baseRef: input.baseRef ?? "",
         headRef: input.headRef ?? "",
+        source: input.source ?? null,
+        gitlabProjectId: input.gitlabProjectId ?? null,
       },
     });
     // M4 SSE：新任务入队 → 广播 pending（若有报告页已打开监听）
