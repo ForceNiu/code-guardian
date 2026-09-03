@@ -23,7 +23,7 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 | 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 |
 | Monaco Diff | 新旧文件左右对比，高亮副作用行 |
 | 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 |
-| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值） |
+| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值）+ GitLab Commit Status 回写（MR 合并红绿灯） |
 
 ---
 

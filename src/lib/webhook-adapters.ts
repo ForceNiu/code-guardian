@@ -61,6 +61,7 @@ const GitLabMrSchema = z.object({
     last_commit: z.object({ id: z.string() }),
   }),
   project: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
     git_http_url: z.string().optional(),
     http_url: z.string().optional(),
   }),
@@ -89,6 +90,7 @@ export function adaptGitLabMr(payload: unknown): AdaptResult {
       commitSha: p.object_attributes.last_commit.id,
       baseRef: p.object_attributes.target_branch,
       headRef: p.object_attributes.source_branch,
+      ...(p.project.id !== undefined ? { gitlabProjectId: String(p.project.id) } : {}),
     },
   };
 }

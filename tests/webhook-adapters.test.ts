@@ -40,7 +40,7 @@ test("adaptGitLabMr 字段映射（base=target，head=source）", () => {
       target_branch: "main",
       last_commit: { id: "abc123" },
     },
-    project: { git_http_url: "https://gitlab.com/group/repo.git" },
+    project: { id: 100, git_http_url: "https://gitlab.com/group/repo.git" },
   };
 
   const r = adaptGitLabMr(payload);
@@ -52,6 +52,7 @@ test("adaptGitLabMr 字段映射（base=target，head=source）", () => {
       commitSha: "abc123",
       baseRef: "main",
       headRef: "feature/price",
+      gitlabProjectId: "100",
     });
   }
 });

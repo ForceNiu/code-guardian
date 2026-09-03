@@ -5,6 +5,7 @@ import { runAnalysis } from "@/worker/run-analysis";
 import { persistSymbolTable, readSymbolCache } from "./persist";
 import { enrichUncertain } from "./ai/enrich";
 import { enrichSecurity } from "./security";
+import { reportGitLabStatus } from "./status/gitlab-status";
 import { getEventBus } from "./events";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
@@ -116,6 +117,16 @@ async function processTask(task: Task) {
       `[scheduler] 任务 ${task.id} 完成：${output.result.summary.changedSymbolCount} 个符号变更，` +
         `${output.result.summary.high} 高危 / ${output.result.summary.medium} 中危 / ${output.result.summary.low} 低危`,
     );
+
+    // M5：回写 GitLab commit status（有高危 → failed 门禁拦截；无 → success）。失败静默降级。
+    try {
+      await reportGitLabStatus({ ...task, status: "done" }, repo, output.result);
+    } catch (gitlabErr) {
+      console.error(
+        "[scheduler] GitLab 状态回写失败:",
+        gitlabErr instanceof Error ? gitlabErr.message : gitlabErr,
+      );
+    }
   } catch (err) {
     const message = err instanceof Error ? `${err.message}\n${err.stack?.slice(0, 500) ?? ""}` : String(err);
     await prisma.task.update({
@@ -124,5 +135,12 @@ async function processTask(task: Task) {
     });
     getEventBus().publish(task.id, { status: "failed", errorMessage: message });
     console.error(`[scheduler] 任务 ${task.id} 失败:`, err);
+
+    // M5：分析失败也回写 failed 门禁状态。失败静默降级。
+    try {
+      await reportGitLabStatus({ ...task, status: "failed" }, repo, null);
+    } catch {
+      /* GitLab 不可用不阻断任务失败态落库 */
+    }
   }
 }

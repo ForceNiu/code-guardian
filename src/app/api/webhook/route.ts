@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const { status, taskId } = await enqueueTask(adapted.input);
+      const { status, taskId } = await enqueueTask({ ...adapted.input, source: adapted.source });
       return NextResponse.json(
         { status, taskId, source: adapted.source },
         { status: status === "created" ? 201 : 200 },

@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/analyze-core.test.cjs tests/rules.test.cjs tests/webhook-adapters.test.ts tests/semantic-graph.test.ts tests/enrich.test.ts tests/events.test.ts tests/dependency-manifest.test.ts tests/cve-scan.test.ts tests/bundle-size.test.ts",
+    "test": "node --import tsx --test tests/analyze-core.test.cjs tests/rules.test.cjs tests/webhook-adapters.test.ts tests/semantic-graph.test.ts tests/enrich.test.ts tests/events.test.ts tests/dependency-manifest.test.ts tests/cve-scan.test.ts tests/bundle-size.test.ts tests/gitlab-status.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
