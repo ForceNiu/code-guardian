@@ -1,0 +1,461 @@
+{
+  "exportedAt": "2026-09-03T13:23:59.961Z",
+  "task": {
+    "id": "cmtljngyp0001us25qyz0vndn",
+    "mrId": "demo-ai-uncertain",
+    "commitSha": "e50fe3c41b3280470091c46ebcb69ac6899c213e",
+    "baseRef": "ad7db8666b419f388feb6bdfc6a131e52c6fd223",
+    "headRef": "e50fe3c41b3280470091c46ebcb69ac6899c213e",
+    "status": "done",
+    "createdAt": "2026-09-03T13:11:35.329Z",
+    "repo": {
+      "name": "sample-repo",
+      "gitUrl": "/Users/nzmin/WorkBuddy/AI/code-guardian/fixtures/sample-repo"
+    }
+  },
+  "result": {
+    "diffs": [
+      {
+        "path": "src/pages/checkout.tsx",
+        "status": "modified",
+        "newContent": "import { formatPrice } from \"../utils/format\";\nimport { calcTotal } from \"../services/cart\";\nimport { OrderStatus } from \"../utils/status\";\n\nexport const CheckoutPage = (price: number, qty: number): string => {\n  const total = calcTotal(price, qty);\n  void OrderStatus.Shipped;\n  return formatPrice(total);\n};\n",
+        "oldContent": "import { formatPrice } from \"../utils/format\";\nimport { calcTotal } from \"../services/cart\";\nimport { OrderStatus } from \"../utils/status\";\n\nexport function CheckoutPage(price: number, qty: number): string {\n  const total = calcTotal(price, qty);\n  void OrderStatus.Shipped;\n  return formatPrice(total);\n}\n"
+      },
+      {
+        "path": "src/pages/home.tsx",
+        "status": "modified",
+        "newContent": "import { formatPrice } from \"../utils/format\";\nimport { add } from \"../utils/math\";\nimport { OrderStatus } from \"../utils/status\";\n\nexport const HomePage = (): string => {\n  const total = add(2, 3);\n  void OrderStatus.Pending;\n  return formatPrice(total);\n};\n",
+        "oldContent": "import { formatPrice } from \"../utils/format\";\nimport { add } from \"../utils/math\";\nimport { OrderStatus } from \"../utils/status\";\n\nexport function HomePage(): string {\n  const total = add(2, 3);\n  void OrderStatus.Pending;\n  return formatPrice(total);\n}\n"
+      },
+      {
+        "path": "src/services/api.ts",
+        "status": "modified",
+        "newContent": "import { formatPrice, formatDate } from \"../utils/format\";\nimport { add } from \"../utils/math\";\n\nexport const fetchUser = (id: number): string => `user-${id}`;\n\nexport function fetchOrder(id: number): string {\n  const total = add(id, 10);\n  return `${formatDate(new Date())}:${formatPrice(total)}`;\n}\n",
+        "oldContent": "import { formatPrice, formatDate } from \"../utils/format\";\nimport { add } from \"../utils/math\";\n\nexport function fetchUser(id: number): string {\n  return `user-${id}`;\n}\n\nexport function fetchOrder(id: number): string {\n  const total = add(id, 10);\n  return `${formatDate(new Date())}:${formatPrice(total)}`;\n}\n"
+      },
+      {
+        "path": "src/services/cart.ts",
+        "status": "modified",
+        "newContent": "import { add, multiply } from \"../utils/math\";\n\nexport const calcTotal = (price: number, qty: number): number =>\n  multiply(price, qty) + add(price, 0);\n",
+        "oldContent": "import { add, multiply } from \"../utils/math\";\n\nexport function calcTotal(price: number, qty: number): number {\n  return multiply(price, qty) + add(price, 0);\n}\n"
+      },
+      {
+        "path": "src/utils/format.ts",
+        "status": "modified",
+        "newContent": "export const formatPrice = (amount: number): string => `¥${amount.toFixed(2)}`;\n",
+        "oldContent": "export function formatPrice(amount: number): string {\n  return `¥${amount.toFixed(2)}`;\n}\n\nexport function formatDate(date: Date): string {\n  return date.toISOString().slice(0, 10);\n}\n"
+      },
+      {
+        "path": "src/utils/math.ts",
+        "status": "modified",
+        "newContent": "export const add = (a: number, b: number): number => a + b;\n\nexport function multiply(a: number, b: number, c: number = 1): number {\n  return a * b * c;\n}\n",
+        "oldContent": "export function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function multiply(a: number, b: number): number {\n  return a * b;\n}\n"
+      },
+      {
+        "path": "src/utils/status.ts",
+        "status": "modified",
+        "newContent": "export enum OrderStatus {\n  Pending,\n  Shipped,\n  Paid,\n  Done,\n}\n",
+        "oldContent": "export enum OrderStatus {\n  Pending,\n  Paid,\n  Shipped,\n  Done,\n}\n"
+      }
+    ],
+    "summary": {
+      "low": 1,
+      "high": 5,
+      "medium": 3,
+      "cacheHits": 0,
+      "totalFiles": 7,
+      "totalSymbols": 9,
+      "changedFileCount": 7,
+      "changedSymbolCount": 9
+    },
+    "impactChain": [
+      {
+        "file": "src/pages/checkout.tsx",
+        "symbol": "CheckoutPage",
+        "severity": "medium",
+        "changeType": "modified",
+        "confidence": "uncertain",
+        "suggestion": "添加结算页面的错误边界处理，避免因部分字段缺失导致整个页面崩溃。",
+        "impactedFiles": []
+      },
+      {
+        "file": "src/pages/home.tsx",
+        "symbol": "HomePage",
+        "severity": "medium",
+        "changeType": "modified",
+        "confidence": "uncertain",
+        "suggestion": "为首页数据加载添加重试机制和默认值，防止网络异常时白屏。",
+        "impactedFiles": []
+      },
+      {
+        "file": "src/services/api.ts",
+        "symbol": "fetchUser",
+        "severity": "medium",
+        "changeType": "modified",
+        "confidence": "uncertain",
+        "suggestion": "在fetchUser中增加响应状态码校验，并统一处理401和500错误。",
+        "impactedFiles": []
+      },
+      {
+        "file": "src/services/cart.ts",
+        "symbol": "calcTotal",
+        "severity": "high",
+        "changeType": "modified",
+        "confidence": "heuristic",
+        "suggestion": "检查calcTotal中浮点数运算逻辑，改用整数分单位或使用decimal库避免精度问题。",
+        "impactedFiles": [
+          "src/pages/checkout.tsx"
+        ]
+      },
+      {
+        "file": "src/utils/format.ts",
+        "symbol": "formatPrice",
+        "severity": "high",
+        "changeType": "modified",
+        "confidence": "heuristic",
+        "suggestion": "为formatPrice添加非数字和NaN输入的保护，并明确货币符号与小数位的格式规则。",
+        "impactedFiles": [
+          "src/pages/checkout.tsx",
+          "src/pages/home.tsx",
+          "src/services/api.ts"
+        ]
+      },
+      {
+        "file": "src/utils/format.ts",
+        "symbol": "formatDate",
+        "severity": "high",
+        "changeType": "removed",
+        "confidence": "proven",
+        "impactedFiles": [
+          "src/services/api.ts"
+        ]
+      },
+      {
+        "file": "src/utils/math.ts",
+        "symbol": "add",
+        "severity": "high",
+        "changeType": "modified",
+        "confidence": "heuristic",
+        "suggestion": "在add函数中验证参数类型，若为字符串则提示错误或强制转换为数字，避免隐式拼接。",
+        "impactedFiles": [
+          "src/pages/home.tsx",
+          "src/services/api.ts",
+          "src/services/cart.ts"
+        ]
+      },
+      {
+        "file": "src/utils/math.ts",
+        "symbol": "multiply",
+        "severity": "low",
+        "changeType": "modified",
+        "confidence": "proven",
+        "impactedFiles": [
+          "src/services/cart.ts"
+        ]
+      },
+      {
+        "file": "src/utils/status.ts",
+        "symbol": "OrderStatus",
+        "severity": "high",
+        "changeType": "modified",
+        "confidence": "proven",
+        "suggestion": "为OrderStatus增加枚举值校验，防止传入非法状态值导致未知错误。",
+        "impactedFiles": [
+          "src/pages/checkout.tsx",
+          "src/pages/home.tsx"
+        ]
+      }
+    ],
+    "changedFiles": [
+      {
+        "path": "src/pages/checkout.tsx",
+        "status": "modified"
+      },
+      {
+        "path": "src/pages/home.tsx",
+        "status": "modified"
+      },
+      {
+        "path": "src/services/api.ts",
+        "status": "modified"
+      },
+      {
+        "path": "src/services/cart.ts",
+        "status": "modified"
+      },
+      {
+        "path": "src/utils/format.ts",
+        "status": "modified"
+      },
+      {
+        "path": "src/utils/math.ts",
+        "status": "modified"
+      },
+      {
+        "path": "src/utils/status.ts",
+        "status": "modified"
+      }
+    ],
+    "changedSymbols": [
+      {
+        "file": "src/pages/checkout.tsx",
+        "line": 5,
+        "symbol": "CheckoutPage",
+        "newSymbol": {
+          "line": 5,
+          "name": "CheckoutPage",
+          "type": "variable"
+        },
+        "oldSymbol": {
+          "line": 5,
+          "name": "CheckoutPage",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            },
+            {
+              "type": "number",
+              "optional": false
+            }
+          ],
+          "paramCount": 2,
+          "returnType": "string"
+        },
+        "changeType": "modified",
+        "newSignature": "variable",
+        "oldSignature": "function(number,number):string"
+      },
+      {
+        "file": "src/pages/home.tsx",
+        "line": 5,
+        "symbol": "HomePage",
+        "newSymbol": {
+          "line": 5,
+          "name": "HomePage",
+          "type": "variable"
+        },
+        "oldSymbol": {
+          "line": 5,
+          "name": "HomePage",
+          "type": "function",
+          "params": [],
+          "paramCount": 0,
+          "returnType": "string"
+        },
+        "changeType": "modified",
+        "newSignature": "variable",
+        "oldSignature": "function():string"
+      },
+      {
+        "file": "src/services/api.ts",
+        "line": 4,
+        "symbol": "fetchUser",
+        "newSymbol": {
+          "line": 4,
+          "name": "fetchUser",
+          "type": "variable"
+        },
+        "oldSymbol": {
+          "line": 4,
+          "name": "fetchUser",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            }
+          ],
+          "paramCount": 1,
+          "returnType": "string"
+        },
+        "changeType": "modified",
+        "newSignature": "variable",
+        "oldSignature": "function(number):string"
+      },
+      {
+        "file": "src/services/cart.ts",
+        "line": 3,
+        "symbol": "calcTotal",
+        "newSymbol": {
+          "line": 3,
+          "name": "calcTotal",
+          "type": "variable"
+        },
+        "oldSymbol": {
+          "line": 3,
+          "name": "calcTotal",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            },
+            {
+              "type": "number",
+              "optional": false
+            }
+          ],
+          "paramCount": 2,
+          "returnType": "number"
+        },
+        "changeType": "modified",
+        "newSignature": "variable",
+        "oldSignature": "function(number,number):number"
+      },
+      {
+        "file": "src/utils/format.ts",
+        "line": 1,
+        "symbol": "formatPrice",
+        "newSymbol": {
+          "line": 1,
+          "name": "formatPrice",
+          "type": "variable"
+        },
+        "oldSymbol": {
+          "line": 1,
+          "name": "formatPrice",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            }
+          ],
+          "paramCount": 1,
+          "returnType": "string"
+        },
+        "changeType": "modified",
+        "newSignature": "variable",
+        "oldSignature": "function(number):string"
+      },
+      {
+        "file": "src/utils/format.ts",
+        "line": 5,
+        "symbol": "formatDate",
+        "oldSymbol": {
+          "line": 5,
+          "name": "formatDate",
+          "type": "function",
+          "params": [
+            {
+              "type": "Date",
+              "optional": false
+            }
+          ],
+          "paramCount": 1,
+          "returnType": "string"
+        },
+        "changeType": "removed",
+        "oldSignature": "function(Date):string"
+      },
+      {
+        "file": "src/utils/math.ts",
+        "line": 1,
+        "symbol": "add",
+        "newSymbol": {
+          "line": 1,
+          "name": "add",
+          "type": "variable"
+        },
+        "oldSymbol": {
+          "line": 1,
+          "name": "add",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            },
+            {
+              "type": "number",
+              "optional": false
+            }
+          ],
+          "paramCount": 2,
+          "returnType": "number"
+        },
+        "changeType": "modified",
+        "newSignature": "variable",
+        "oldSignature": "function(number,number):number"
+      },
+      {
+        "file": "src/utils/math.ts",
+        "line": 3,
+        "symbol": "multiply",
+        "newSymbol": {
+          "line": 3,
+          "name": "multiply",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            },
+            {
+              "type": "number",
+              "optional": false
+            },
+            {
+              "type": "number",
+              "optional": true
+            }
+          ],
+          "paramCount": 3,
+          "returnType": "number"
+        },
+        "oldSymbol": {
+          "line": 5,
+          "name": "multiply",
+          "type": "function",
+          "params": [
+            {
+              "type": "number",
+              "optional": false
+            },
+            {
+              "type": "number",
+              "optional": false
+            }
+          ],
+          "paramCount": 2,
+          "returnType": "number"
+        },
+        "changeType": "modified",
+        "newSignature": "function(number,number,number?):number",
+        "oldSignature": "function(number,number):number"
+      },
+      {
+        "file": "src/utils/status.ts",
+        "line": 1,
+        "symbol": "OrderStatus",
+        "newSymbol": {
+          "line": 1,
+          "name": "OrderStatus",
+          "type": "enum",
+          "enumMembers": [
+            "Pending",
+            "Shipped",
+            "Paid",
+            "Done"
+          ]
+        },
+        "oldSymbol": {
+          "line": 1,
+          "name": "OrderStatus",
+          "type": "enum",
+          "enumMembers": [
+            "Pending",
+            "Paid",
+            "Shipped",
+            "Done"
+          ]
+        },
+        "changeType": "modified",
+        "newSignature": "enum{Pending,Shipped,Paid,Done}",
+        "oldSignature": "enum{Pending,Paid,Shipped,Done}"
+      }
+    ]
+  }
+}

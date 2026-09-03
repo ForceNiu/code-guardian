@@ -3,7 +3,7 @@
 在 MR 合并前自动分析 **「这次改动影响了哪些函数、哪些文件」**，作为合并门禁依据。
 ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **AST 增量分析 + 反向索引** 把影响链路自动算出来。
 
-> 当前进度：**M1（骨架）+ M2（Worker 核心）已跑通**。规则引擎 / AI 双轨 / 安全门禁见 [架构文档](docs/architecture.md) 里程碑部分。
+> 当前进度：**M1（骨架）→ M4（前端联调）已全部完成并合并**。仅剩 **M5 安全门禁**（CVE 扫描 + 构建体积检测 + GitLab 状态互操作）待做。详见 [架构文档](docs/architecture.md) 里程碑部分。
 
 ---
 
@@ -11,13 +11,17 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 
 | 能力 | 说明 |
 | :--- | :--- |
-| Webhook 接收 | `POST /api/webhook` 幂等入队，唯一索引防重 |
+| 多源 Webhook | `POST /api/webhook` 幂等入队，适配 GitLab MR / GitHub push / GitHub PR，唯一索引防重 |
 | 手动触发 | 首页粘贴仓库地址 + base/head ref 即可分析 |
 | AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里，不阻塞主线程 |
-| 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量 |
+| 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 |
 | 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」→ 改一个函数立刻知道影响范围 |
+| 确定性规则引擎 | 27 条查表规则（函数签名/字段/别名/重命名导出/enum/class），semver 判据 + confidence 三档 |
+| AI 语义引擎 | 规则判为 `uncertain` 的变更送 LangGraph 4 节点（DeepSeek）补判定，失败静默降级 |
 | 影响链路 | 对比 base/head 导出签名，输出「文件 → 符号 → 变更类型 → 影响文件」 |
 | 任务调度 | 数据库状态机 + 5s 轮询 + 信号量限 3 并发，无 Redis/队列 |
+| 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 |
+| Monaco Diff | 新旧文件左右对比，高亮副作用行 |
 | 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 |
 
 ---
@@ -27,6 +31,8 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 - **Next.js 16**（App Router）+ **React 19** + **TypeScript**（strict）
 - **Prisma 6** + **PostgreSQL**（Neon 云库）
 - **@babel/parser / @babel/traverse**（AST）
+- **@langchain/langgraph**（AI 语义引擎 4 节点管线）+ **DeepSeek**
+- **@monaco-editor/react**（Diff 对比）
 - **worker_threads**（CPU 隔离）
 - **zod**（入参校验）
 
@@ -78,10 +84,10 @@ curl -X POST http://localhost:3000/api/webhook \
 
 ```
 prisma/            schema（5 张表）+ seed
-src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks）
-src/lib/           调度器 · 单例 · 入队 · 持久化 · 类型
-src/worker/        Worker 线程（git + AST + 反向索引 + 影响链路）
-src/components/    状态步骤 · 风险总览 · 影响链路表
+src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
+src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · 类型
+src/worker/        Worker 线程（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）
+src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
 fixtures/          演示用 git 仓库
 docs/              架构文档
 ```

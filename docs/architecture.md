@@ -49,28 +49,33 @@ code-guardian/
 ├── src/
 │   ├── app/
 │   │   ├── page.tsx           # 首页：任务列表 + 手动触发
-│   │   ├── tasks/[id]/page.tsx# 报告页：步骤/风险/影响链路（轮询刷新）
+│   │   ├── tasks/[id]/page.tsx# 报告页：步骤/风险/影响链路（SSE 订阅 + 轮询兜底）
 │   │   └── api/
-│   │       ├── webhook/route.ts      # GitLab Webhook（幂等防重）
-│   │       ├── tasks/route.ts        # 列表 + 手动触发
-│   │       └── tasks/[id]/route.ts   # 任务详情
+│   │       ├── webhook/route.ts           # 多源 Webhook 入口（幂等防重）
+│   │       ├── tasks/route.ts             # 列表 + 手动触发
+│   │       ├── tasks/[id]/route.ts        # 任务详情
+│   │       └── tasks/[id]/stream/route.ts # SSE 实时进度（text/event-stream）
 │   ├── lib/
-│   │   ├── prisma.ts          # 单例（globalThis 防热重载耗尽连接）
-│   │   ├── scheduler.ts       # 轮询调度器 + 信号量 + 原子认领
-│   │   ├── enqueue.ts         # 入队（靠唯一索引防重）
-│   │   ├── persist.ts         # 符号缓存落库
-│   │   ├── ai/                # M3b AI 语义引擎
+│   │   ├── prisma.ts           # 单例（globalThis 防热重载耗尽连接）
+│   │   ├── scheduler.ts        # 轮询调度器 + 信号量 + 原子认领 + 事件发布
+│   │   ├── enqueue.ts          # 入队（靠唯一索引防重）+ 事件发布
+│   │   ├── persist.ts          # 符号缓存落库
+│   │   ├── events.ts           # 进程内事件总线（EventEmitter 挂 globalThis）
+│   │   ├── webhook-adapters.ts # 三源适配（GitLab MR / GitHub push / GitHub PR）
+│   │   ├── ai/                 # M3b AI 语义引擎
 │   │   │   ├── deepseek.ts       # DeepSeek 客户端（HTTP 代理 CONNECT 隧道）
 │   │   │   ├── semantic-graph.ts # LangGraph 4 节点管线（重述→检索→预测→建议）
 │   │   │   └── enrich.ts         # uncertain 变更集成层（合并判定回 impactChain）
-│   │   └── types.ts           # Worker ↔ 主线程共享类型
+│   │   └── types.ts            # Worker ↔ 主线程共享类型
 │   ├── worker/
-│   │   ├── analyze.worker.cjs # Worker：git + AST + 反向索引 + 影响链路
-│   │   └── run-analysis.ts    # 主线程封装（new Worker + Promise）
-│   ├── components/            # StatusSteps / RiskSummary / ImpactTable
-│   └── instrumentation.ts     # 启动时拉起调度器
-├── fixtures/sample-repo/      # 演示用 git 仓库（独立历史）
-├── scripts/create-fixture.sh  # 生成演示仓库
+│   │   ├── analyze-core.cjs    # AST 核心：导出符号提取 + 签名 + 字段/别名
+│   │   ├── rules.cjs           # 确定性规则引擎（27 条查表 + confidence 三档）
+│   │   ├── analyze.worker.cjs  # Worker：git + AST + 反向索引 + 影响链路
+│   │   └── run-analysis.ts     # 主线程封装（new Worker + Promise）
+│   ├── components/             # StatusSteps / RiskSummary / ImpactTable / DiffViewer
+│   └── instrumentation.ts      # 启动时拉起调度器
+├── fixtures/sample-repo/       # 演示用 git 仓库（独立历史）
+├── scripts/create-fixture.sh   # 生成演示仓库
 └── docs/architecture.md
 ```
 
@@ -122,7 +127,7 @@ Webhook / 手动触发
 | 大仓全量扫描太慢 | 文件 MD5 哈希缓存 + 只 diff 变更文件 | `file_snapshots` 表 |
 | 跨文件引用追踪 | 反向索引表：每个导出符号存「谁引用它」 | `export_symbols.importers` |
 
-> 说明：M1-M2 阶段 Worker 每次做全量解析保证正确性（Babel 解析百级文件 < 1s，本就满足 M2 的 8s 验收）；`file_snapshots` 哈希缓存已就位，增量「跳过未变文件重解析」是 M2 收尾优化，代码结构已预留。
+> 说明：Worker 全量解析保证正确性（Babel 解析百级文件 < 1s，满足 M2 的 8s 验收）；`file_snapshots` 哈希缓存 + 增量「跳过未变文件重解析」已在 M2 收尾落地。
 
 ---
 
@@ -131,9 +136,9 @@ Webhook / 手动触发
 | 里程碑 | 内容 | 本项目状态 |
 | :--- | :--- | :--- |
 | **M1 骨架** | Prisma 建表 + Webhook 防重 + 任务入队 | ✅ 已实现 |
-| **M2 Worker 核心** | git + AST + 导出符号 + 缓存 + 影响链路 | ✅ 已实现（全量解析） |
-| M3 规则引擎 | 15 条 AST 硬规则 + LangGraph 双轨 | ⏳ 待做（`lib/rules/` 预留位） |
-| M4 前端联调 | AntD Steps + SSE + Monaco Diff | ⏳ 待做（当前为轻量自研 UI + 轮询） |
+| **M2 Worker 核心** | git + AST + 导出符号 + 缓存 + 影响链路 | ✅ 已实现（增量缓存命中跳过重解析） |
+| M3 规则引擎 | 27 条 AST 硬规则 + LangGraph 双轨 | ✅ 已实现（确定性规则引擎 + AI 语义引擎） |
+| M4 前端联调 | SSE 实时进度 + Monaco Diff + 任意 head | ✅ 已实现（跳过 AntD，自研轻量 UI） |
 | M5 安全门禁 | CVE 扫描 + 构建体积检测 + GitLab 状态互操作 | ⏳ 待做 |
 
 ---

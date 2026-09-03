@@ -150,9 +150,58 @@ export default function TaskDetailPage() {
 
           <div className="card">
             <h2>影响链路</h2>
-            <p className="desc">「第 X 行 → 影响函数 Y → 影响文件 Z」的跨文件引用追踪结果。</p>
+            <p className="desc">
+              「改动文件 → 导出符号 → 规则引擎/AI 语义引擎定级 → 引用方文件」的完整链路：
+              规则引擎能确定的直接定级，归不了类的 <code>uncertain</code> 变更送 AI 语义引擎二次判定并给出修复建议。
+            </p>
             <ImpactTable edges={r.impactChain} />
           </div>
+
+          {r.impactChain.some((e) => e.suggestion) && (
+            <div className="card">
+              <h2>AI 语义判定明细</h2>
+              <p className="desc">
+                以下为规则引擎判为 <code>uncertain</code>、转交 DeepSeek 语义引擎（LangGraph 四节点：
+                问题重述 → 上下文检索 → 影响面预测 → 修复建议）判定的变更。
+              </p>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 220 }}>变更符号</th>
+                    <th style={{ width: 80 }}>风险</th>
+                    <th style={{ width: 90 }}>置信度</th>
+                    <th>AI 修复建议</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.impactChain
+                    .filter((e) => e.suggestion)
+                    .map((e, i) => (
+                      <tr key={i}>
+                        <td className="mono">
+                          {e.file}
+                          <span style={{ color: "var(--text-2)" }}>#{e.symbol}</span>
+                        </td>
+                        <td>
+                          <span className={`badge ${e.severity}`}>
+                            {e.severity === "high" ? "高危" : e.severity === "medium" ? "中危" : "低危"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${e.confidence}`}>
+                            {e.confidence === "proven" ? "确定" : e.confidence === "heuristic" ? "经验" : "待定"}
+                          </span>
+                        </td>
+                        <td className="suggestion-line" style={{ border: "none", background: "transparent", padding: "10px 12px" }}>
+                          <span className="mark">AI</span>
+                          <span className="txt">{e.suggestion}</span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {r.changedSymbols.length > 0 && (
             <div className="card">
