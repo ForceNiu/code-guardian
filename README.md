@@ -3,7 +3,7 @@
 在 MR 合并前自动分析 **「这次改动影响了哪些函数、哪些文件」**，作为合并门禁依据。
 ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **AST 增量分析 + 反向索引** 把影响链路自动算出来。
 
-> 当前进度：**M1（骨架）→ M4（前端联调）已全部完成并合并**。**M5 安全门禁**进行中：CVE 扫描 + 构建体积检测已完成，GitLab 状态回写待做。详见 [架构文档](docs/architecture.md) 里程碑部分。
+> 当前进度：**M1（骨架）→ M5（安全门禁）已全部完成并合并**。M5 覆盖 CVE 依赖漏洞扫描 + 构建体积门禁 + GitLab 状态回写。详见 [架构文档](docs/architecture.md) 里程碑部分。
 
 ---
 
@@ -90,10 +90,10 @@ src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook �
 src/worker/        Worker 线程（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）
 src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
 fixtures/          演示用 git 仓库
-docs/              架构文档
+docs/              产品文档 · 架构文档
 ```
 
-详见 [docs/architecture.md](docs/architecture.md)。
+详见 [产品文档](docs/product.md) 与 [架构文档](docs/architecture.md)。
 
 ---
 
