@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { getEventBus } from "./events";
 
 export interface EnqueueInput {
   gitUrl: string;
@@ -43,6 +44,8 @@ export async function enqueueTask(input: EnqueueInput): Promise<EnqueueResult> {
         headRef: input.headRef ?? "",
       },
     });
+    // M4 SSE：新任务入队 → 广播 pending（若有报告页已打开监听）
+    getEventBus().publish(task.id, { status: "pending" });
     return { status: "created", taskId: task.id };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {

@@ -47,6 +47,14 @@ export interface ImportInfo {
 /** 变更文件的 diff 状态 */
 export type ChangeStatus = "added" | "modified" | "deleted";
 
+/** M4 Monaco Diff：单个变更文件的 base/head 全文（供前端 diff 视图渲染） */
+export interface FileDiff {
+  path: string;
+  status: ChangeStatus;
+  oldContent: string;
+  newContent: string;
+}
+
 /** 一条变更符号记录 */
 export interface ChangedSymbol {
   file: string;
@@ -81,6 +89,8 @@ export interface AnalysisResult {
   changedFiles: { path: string; status: ChangeStatus }[];
   changedSymbols: ChangedSymbol[];
   impactChain: ImpactEdge[];
+  /** M4 Monaco Diff：变更文件 base/head 全文（老任务无此字段，前端需容错 undefined） */
+  diffs?: FileDiff[];
   summary: {
     totalFiles: number;
     totalSymbols: number;

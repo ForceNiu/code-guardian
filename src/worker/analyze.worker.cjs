@@ -42,6 +42,14 @@ function ensureRepo(gitUrl, workdir) {
   }
 }
 
+/** 切换到 headRef（detached HEAD），保证工作区文件 = head 状态，供读取新代码全文 */
+function checkoutHead(headRef, workdir) {
+  const out = git(`git -C "${workdir}" checkout --force --quiet "${headRef}"`, workdir);
+  if (out == null) {
+    throw new Error(`git checkout 失败：headRef ${headRef} 不可达`);
+  }
+}
+
 /** 变更文件列表（git diff base...head --name-only） */
 function changedFiles(baseRef, headRef, workdir) {
   const out = git(`git -C "${workdir}" diff --name-only ${baseRef}...${headRef}`, workdir);
@@ -83,6 +91,7 @@ function listSourceFiles(workdir) {
 function main() {
   const { gitUrl, baseRef, headRef, workdir, cache } = workerData;
   ensureRepo(gitUrl, workdir);
+  checkoutHead(headRef, workdir);
 
   const allFiles = new Set(listSourceFiles(workdir));
   const changed = changedFiles(baseRef, headRef, workdir).filter((f) =>
@@ -126,6 +135,7 @@ function main() {
   // 3) 变更符号 diff：对比 base 与 head 的导出签名
   const changedSymbols = [];
   const changedFileStatus = [];
+  const diffs = []; // M4 Monaco Diff：每个变更文件的 base/head 全文
   for (const file of changed) {
     const existsInHead = allFiles.has(file);
     const newExports = existsInHead ? exportsByFile.get(file) || [] : [];
@@ -136,6 +146,10 @@ function main() {
     if (oldContent == null) status = "added";
     else if (!existsInHead) status = "deleted";
     changedFileStatus.push({ path: file, status });
+
+    // M4：取 head 版本全文（deleted 文件在 head 不存在 → 空串），供 Monaco Diff 两侧渲染
+    const newContent = existsInHead ? fs.readFileSync(path.join(workdir, file), "utf8") : "";
+    diffs.push({ path: file, status, oldContent: oldContent ?? "", newContent });
 
     changedSymbols.push(...diffSymbols(file, oldExports, newExports));
   }
@@ -187,7 +201,7 @@ function main() {
   }
 
   parentPort.postMessage({
-    result: { changedFiles: changedFileStatus, changedSymbols, impactChain, summary },
+    result: { changedFiles: changedFileStatus, changedSymbols, impactChain, summary, diffs },
     symbolTable,
   });
 }
