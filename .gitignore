@@ -20,3 +20,7 @@ prisma/*.db
 
 # demo fixture（自带独立 git 历史，不进外层仓库）
 fixtures/
+
+# 备份文件（编辑器 / 工具留的旧版副本，不入库）
+*.bak
+*.backup
