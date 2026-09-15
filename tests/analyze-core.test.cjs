@@ -691,3 +691,67 @@ test("resolveExportOrigin 可穿透到 base 侧已删除文件（删除文件的
     null, // 无导出可查 → null，调用方回退到 targetFile 本身，引用方仍被登记
   );
 });
+
+// ---- tsconfig 路径别名解析 ----
+
+const { resolveImportWithAlias, buildPathAliases, parseJsonc } = require("../src/worker/analyze-core.cjs");
+
+test("parseJsonc 能剥离注释与尾逗号", () => {
+  const text = `{
+    // 行注释
+    "compilerOptions": {
+      "baseUrl": ".", /* 块注释 */
+      "paths": { "@/*": ["./src/*"] },
+    },
+  }`;
+  const obj = parseJsonc(text);
+  assert.deepEqual(obj.compilerOptions.paths, { "@/*": ["./src/*"] });
+  assert.equal(obj.compilerOptions.baseUrl, ".");
+});
+
+test("parseJsonc 不误伤字符串里的 https://", () => {
+  const obj = parseJsonc('{ "url": "https://example.com//x" }');
+  assert.equal(obj.url, "https://example.com//x");
+});
+
+test("buildPathAliases 解析 @/* 通配映射", () => {
+  const aliases = buildPathAliases('{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }');
+  assert.equal(aliases.length, 1);
+  assert.equal(aliases[0].prefix, "@/");
+  assert.equal(aliases[0].targetBase, "./src/");
+  assert.equal(aliases[0].baseDir, ".");
+});
+
+test("buildPathAliases 对非法 JSON / 无 paths 安全返回空", () => {
+  assert.deepEqual(buildPathAliases("不是 JSON"), []);
+  assert.deepEqual(buildPathAliases("{}"), []);
+  assert.deepEqual(buildPathAliases(undefined), []);
+});
+
+test("resolveImportWithAlias 能解析 @/ 别名到真实文件", () => {
+  const aliases = buildPathAliases('{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }');
+  const allFiles = new Set(["src/components/NavBar.tsx", "src/lib/utils.ts", "src/app/page.tsx"]);
+  assert.equal(
+    resolveImportWithAlias("@/components/NavBar", "src/app/page.tsx", allFiles, aliases),
+    "src/components/NavBar.tsx",
+  );
+  // 目录 → 补 /index
+  assert.equal(
+    resolveImportWithAlias("@/lib/utils", "src/app/page.tsx", allFiles, aliases),
+    "src/lib/utils.ts",
+  );
+});
+
+test("resolveImportWithAlias 无别名时退化为纯相对解析（行为不变）", () => {
+  const allFiles = new Set(["src/utils/format.ts", "src/app/page.tsx"]);
+  assert.equal(resolveImportWithAlias("../utils/format", "src/app/page.tsx", allFiles, []), "src/utils/format.ts");
+  // 裸包名依然不解析（node_modules 不关心）
+  assert.equal(resolveImportWithAlias("react", "src/app/page.tsx", allFiles, []), null);
+  assert.equal(resolveImportWithAlias("@/x", "src/app/page.tsx", allFiles, []), null);
+});
+
+test("resolveImportWithAlias 尊重 baseUrl 子目录", () => {
+  const aliases = buildPathAliases('{ "compilerOptions": { "baseUrl": "./config", "paths": { "~/*": ["../src/*"] } } }');
+  const allFiles = new Set(["src/lib/a.ts", "src/app/page.tsx"]);
+  assert.equal(resolveImportWithAlias("~/lib/a", "src/app/page.tsx", allFiles, aliases), "src/lib/a.ts");
+});
