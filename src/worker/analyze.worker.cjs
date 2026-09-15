@@ -168,7 +168,10 @@ function main() {
   for (const file of changed) {
     const existsInHead = allFiles.has(file);
     const newExports = existsInHead ? exportsByFile.get(file) || [] : [];
-    const oldContent = git(["-C", workdir, "show", `${baseRef}:"${file}"`], workdir);
+    // ⚠️ 绝不能给路径加引号：`execFileSync` 不经 shell，引号会变成路径的一部分
+    // （git 会去找名为 "src/x.ts" 带引号的文件 → 找不到 → 返回 null → 所有文件被误判 added）。
+    // 无 shell 时路径含空格也是安全的，不需要引号。
+    const oldContent = git(["-C", workdir, "show", `${baseRef}:${file}`], workdir);
     const oldExports = oldContent != null ? parseFile(oldContent).exports : [];
 
     let status = "modified";
