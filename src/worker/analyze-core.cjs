@@ -328,17 +328,108 @@ function parseFile(code) {
   return { exports, imports, reexports };
 }
 
-/** 把相对导入说明符解析成仓库内文件路径（补全扩展名 / index），无法解析返回 null */
-function resolveImport(source, importerRel, allFiles) {
-  if (!source.startsWith(".")) return null; // 仅追踪仓库内相对引用（node_modules 不关心）
-  const importerDir = path.posix.dirname(importerRel);
-  const base = path.posix.normalize(path.posix.join(importerDir, source));
+/** 按候选路径命中文件：原样 / 补扩展名 / 补 /index */
+function resolveCandidates(base, allFiles) {
   const candidates = [base];
   for (const ext of SOURCE_EXT) {
     candidates.push(base + ext, base + "/index" + ext);
   }
   for (const c of candidates) {
     if (allFiles.has(c)) return c;
+  }
+  return null;
+}
+
+/** 把相对导入说明符解析成仓库内文件路径（补全扩展名 / index），无法解析返回 null */
+function resolveImport(source, importerRel, allFiles) {
+  if (!source.startsWith(".")) return null; // 仅追踪仓库内相对引用（node_modules 不关心）
+  const importerDir = path.posix.dirname(importerRel);
+  const base = path.posix.normalize(path.posix.join(importerDir, source));
+  return resolveCandidates(base, allFiles);
+}
+
+/**
+ * 宽松 JSON 解析：tsconfig.json 常带行注释、块注释与尾逗号（即 JSONC），标准 JSON.parse 会直接抛错。
+ *
+ * 用**字符串感知**的逐字符扫描，而不是正则替换：正则无法区分
+ * `"https://x"` 里的斜杠和真正的注释，会截断字符串。这里是纯函数，便于单测。
+ */
+function parseJsonc(text) {
+  let out = "";
+  let inString = false;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (inLine) {
+      if (c === "\n") { inLine = false; out += c; }
+      continue;
+    }
+    if (inBlock) {
+      if (c === "*" && n === "/") { inBlock = false; i++; }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (c === "\\") { out += text[++i] ?? ""; continue; } // 转义字符整体保留
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "/" && n === "/") { inLine = true; i++; continue; }
+    if (c === "/" && n === "*") { inBlock = true; i++; continue; }
+    out += c;
+  }
+  return JSON.parse(out.replace(/,(\s*[}\]])/g, "$1")); // 去尾逗号
+}
+
+/**
+ * 从 tsconfig.json 内容构建路径别名表（compilerOptions.paths + baseUrl）。
+ * 只处理 `前缀/*` → `目标/*` 的通配形式；无别名的项目返回空数组。
+ * ⚠️ 不处理 `extends`（继承来的 paths 读不到）——大多数项目写在根 tsconfig，够用。
+ *
+ * @returns {Array<{prefix: string, targetBase: string, baseDir: string}>}
+ */
+function buildPathAliases(tsconfigText, tsconfigDir = "") {
+  if (!tsconfigText) return [];
+  let co;
+  try {
+    co = parseJsonc(tsconfigText).compilerOptions || {};
+  } catch {
+    return []; // 解析失败就当没有别名，不影响主链路
+  }
+  const baseDir = path.posix.normalize(path.posix.join(tsconfigDir || ".", co.baseUrl || "."));
+  const aliases = [];
+  for (const [pattern, targets] of Object.entries(co.paths || {})) {
+    if (!Array.isArray(targets)) continue;
+    for (const t of targets) {
+      if (typeof t !== "string") continue;
+      aliases.push({
+        prefix: pattern.endsWith("/*") ? pattern.slice(0, -1) : pattern, // "@/"
+        targetBase: t.endsWith("/*") ? t.slice(0, -1) : t, // "./src/"
+        baseDir,
+      });
+    }
+  }
+  return aliases;
+}
+
+/**
+ * 解析导入说明符：先按相对路径，失败再试 tsconfig 路径别名。
+ * 为什么必须有别名：现代 Next/TS 项目 90%+ 的内部引用走 `@/xxx`，
+ * 只认相对路径会让影响图漏掉绝大多数引用（实测 interview-forge 可见率仅 7.7%）。
+ */
+function resolveImportWithAlias(source, importerRel, allFiles, aliases) {
+  const direct = resolveImport(source, importerRel, allFiles);
+  if (direct) return direct;
+  if (!aliases || aliases.length === 0) return null;
+  for (const a of aliases) {
+    if (!source.startsWith(a.prefix)) continue;
+    const rest = source.slice(a.prefix.length);
+    const base = path.posix.normalize(path.posix.join(a.baseDir, a.targetBase + rest));
+    const hit = resolveCandidates(base, allFiles);
+    if (hit) return hit;
   }
   return null;
 }
@@ -524,14 +615,14 @@ function resolveFileSymbols(file, isChanged, content, hash, cache) {
  * @param {Set<string>} [seen] 递归访问集，用于截断循环转发（a → b → a）
  * @returns {string|null} 定义文件路径；解析不到返回 null
  */
-function resolveExportOrigin(targetFile, name, exportsByFile, reexportsByFile, files, seen) {
+function resolveExportOrigin(targetFile, name, exportsByFile, reexportsByFile, files, seen, aliases) {
   const visited = seen || new Set();
   if (!targetFile || visited.has(targetFile)) return null;
   const defined = (exportsByFile.get(targetFile) || []).some((s) => s.name === name);
   if (defined) return targetFile;
   visited.add(targetFile);
   for (const re of reexportsByFile.get(targetFile) || []) {
-    const next = resolveImport(re.source, targetFile, files);
+    const next = resolveImportWithAlias(re.source, targetFile, files, aliases);
     const origin = resolveExportOrigin(next, name, exportsByFile, reexportsByFile, files, visited);
     if (origin) return origin;
   }
@@ -554,4 +645,8 @@ module.exports = {
   pairRenameExports,
   resolveFileSymbols,
   resolveExportOrigin,
+  resolveCandidates,
+  parseJsonc,
+  buildPathAliases,
+  resolveImportWithAlias,
 };

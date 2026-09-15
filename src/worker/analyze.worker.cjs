@@ -14,10 +14,11 @@ const {
   SOURCE_EXT,
   md5,
   parseFile,
-  resolveImport,
   diffSymbols,
   resolveFileSymbols,
   resolveExportOrigin,
+  buildPathAliases,
+  resolveImportWithAlias,
 } = require("./analyze-core.cjs");
 const { runRules } = require("./rules.cjs");
 
@@ -116,6 +117,15 @@ function main() {
   const baseOnlyFiles = new Set(changed.filter((f) => !allFiles.has(f)));
   const resolvableFiles = baseOnlyFiles.size > 0 ? new Set([...allFiles, ...baseOnlyFiles]) : allFiles;
 
+  // 读根 tsconfig.json 的路径别名（如 @/* -> ./src/*）。
+  // 没有别名时 buildPathAliases 返回空数组，resolveImportWithAlias 退化为纯相对解析，行为不变。
+  let aliases = [];
+  try {
+    aliases = buildPathAliases(fs.readFileSync(path.join(workdir, "tsconfig.json"), "utf8"));
+  } catch {
+    aliases = []; // 无 tsconfig / 读不到 → 按无别名处理
+  }
+
   // 1) 解析：变更文件重解析；未变更文件命中增量缓存则复用，否则解析
   const exportsByFile = new Map();
   const importsByFile = new Map();
@@ -144,7 +154,7 @@ function main() {
   //    import 方注册在 barrel 上（barrel#name），而变更符号在 real.ts，影响链路查不到。
   //    实现见 analyze-core.cjs 的 resolveExportOrigin（纯函数，可单测）。
   const originOf = (targetFile, name) =>
-    resolveExportOrigin(targetFile, name, exportsByFile, reexportsByFile, resolvableFiles);
+    resolveExportOrigin(targetFile, name, exportsByFile, reexportsByFile, resolvableFiles, undefined, aliases);
 
   // 3) 反向索引：`${file}#${symbol}` -> 引用它的文件列表
   //    经 resolveExportOrigin 归一：barrel 转发的 import 记到定义文件上，
@@ -152,7 +162,7 @@ function main() {
   const reverseIndex = new Map();
   for (const [importer, imports] of importsByFile) {
     for (const imp of imports) {
-      const targetFile = resolveImport(imp.source, importer, resolvableFiles);
+      const targetFile = resolveImportWithAlias(imp.source, importer, resolvableFiles, aliases);
       if (!targetFile) continue;
       const origin = originOf(targetFile, imp.name) || targetFile;
       const key = `${origin}#${imp.name}`;
