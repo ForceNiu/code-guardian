@@ -44,6 +44,12 @@ export interface ImportInfo {
   line: number;
 }
 
+/** 一条 barrel 转发边（export * from "./x"），供影响图穿透到符号真正定义处 */
+export interface ReexportInfo {
+  source: string; // 转发的模块说明符
+  line: number;
+}
+
 /** 变更文件的 diff 状态 */
 export type ChangeStatus = "added" | "modified" | "deleted";
 
@@ -143,6 +149,8 @@ export interface SymbolTableEntry {
   exports: SymbolInfo[];
   /** 完整 import 列表，写 file_snapshots.symbols 供下次增量复用 */
   imports: ImportInfo[];
+  /** barrel 转发边（export * from），写 file_snapshots.symbols 供下次增量复用 */
+  reexports: ReexportInfo[];
 }
 
 /** 增量缓存：主线程从 file_snapshots 读出，随 workerData 传给 worker 复用 */
@@ -150,6 +158,8 @@ export interface SymbolCache {
   hashByFile: Record<string, string>;
   exportsByFile: Record<string, SymbolInfo[]>;
   importsByFile: Record<string, ImportInfo[]>;
+  /** barrel 转发边（旧缓存无此字段，需容错） */
+  reexportsByFile?: Record<string, ReexportInfo[]>;
 }
 
 /** Worker 输出：分析报告 + 符号缓存 */

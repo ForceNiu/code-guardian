@@ -21,7 +21,10 @@ function containsAny(sym) {
 /**
  * 分类函数签名变更：对比 old/new 的 async / returnType / params，
  * 返回一个变更类型标签，供查表定级。
- * 简化约定：新增参数按「追加到尾部」对齐（覆盖最常见场景，插入中间参数后续精确化）。
+ *
+ * 对齐策略：
+ * - 参数带名称时按名对齐（精确识别「中间插入/删除必填参数」这类破坏性变更）；
+ * - 参数无名称（如单测构造、解构参数）退回位置对齐，覆盖最常见场景。
  */
 function classifyFunctionChange(oldSym, newSym) {
   // 同步 ↔ 异步（async 会让返回类型从 T 变 Promise<T>，故优先于返回类型判断）
@@ -35,12 +38,49 @@ function classifyFunctionChange(oldSym, newSym) {
   const op = oldSym.params || [];
   const np = newSym.params || [];
 
-  // 新增参数
+  // 有参数名 → 按名对齐
+  const hasNames = op.some((p) => p.name != null) || np.some((p) => p.name != null);
+  if (hasNames) {
+    const om = new Map(op.filter((p) => p.name != null).map((p) => [p.name, p]));
+    const nm = new Map(np.filter((p) => p.name != null).map((p) => [p.name, p]));
+    // 删除（旧有、新无）
+    for (const p of op) {
+      if (p.name != null && !nm.has(p.name)) return "removedParam";
+    }
+    // 新增（新有、旧无）；命中任一必填 → 破坏性（覆盖中间插入场景）
+    let addedRequired = false;
+    let addedOptional = false;
+    for (const p of np) {
+      if (p.name == null || !om.has(p.name)) {
+        if (p.optional) addedOptional = true;
+        else addedRequired = true;
+      }
+    }
+    if (addedRequired) return "addedRequiredParam";
+    if (addedOptional) return "addedOptionalParam";
+    // 同名逐个对比 optional / type
+    for (const [name, n] of nm) {
+      const o = om.get(name);
+      if (!o) continue;
+      if (!!o.optional !== !!n.optional) {
+        return n.optional ? "paramRequiredToOptional" : "paramOptionalToRequired";
+      }
+      const ot = o.type || "";
+      const nt = n.type || "";
+      if (ot !== nt) {
+        if (ot === "any" && nt !== "any") return "paramTypeNarrowed"; // any→具体 = 收紧
+        if (ot !== "any" && nt === "any") return "paramTypeWidened"; // 具体→any = 放宽
+        return "paramTypeUnclear"; // 具体→具体，方向不明
+      }
+    }
+    return "unknown";
+  }
+
+  // 无参数名 → 位置对齐
   if (np.length > op.length) {
     const added = np[op.length]; // 尾部新增
     return added && added.optional ? "addedOptionalParam" : "addedRequiredParam";
   }
-  // 移除参数
   if (np.length < op.length) return "removedParam";
 
   // 参数个数相同，逐个对比

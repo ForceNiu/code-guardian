@@ -54,7 +54,8 @@ export async function measureBundleSize(
     try {
       const version = isExactVersion(dep.version) ? dep.version : "latest";
       const url = `${REGISTRY_URL}/${registryPath(dep.name)}/${version}`;
-      const resp = await fetchImpl(url);
+      // P2：单包查询加 10s 超时，防 registry 挂起；单个超时由外层 catch 静默跳过。
+      const resp = await fetchImpl(url, { signal: AbortSignal.timeout(10000) });
       if (!resp.ok) return { name: dep.name, version: dep.version, bytes: 0 };
       const data = (await resp.json()) as RegistryVersion;
       return {

@@ -10,6 +10,8 @@ import { getEventBus } from "./events";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
 const POLL_INTERVAL_MS = 5000; // 每 5 秒轮询一次
+const TASK_TIMEOUT_MS = 300000; // P2：单任务硬超时 5 分钟，防挂起占死并发槽
+const STALE_TASK_MS = 600000; // P3：卡在中间态超过 10 分钟视为崩溃，回收重排
 
 let running = 0;
 let started = false;
@@ -38,6 +40,23 @@ async function tick() {
   if (running >= MAX_CONCURRENT) return;
   const slots = MAX_CONCURRENT - running;
 
+  // P3：回收崩溃/卡死的中间态任务。进程崩了没机会把任务置 failed，
+  // 这里靠 updatedAt 过期（>STALE_TASK_MS）识别，重置回 pending 重新入队。
+  try {
+    const reclaimed = await prisma.task.updateMany({
+      where: {
+        status: { in: ["parsing", "analyzing", "reporting"] },
+        updatedAt: { lt: new Date(Date.now() - STALE_TASK_MS) },
+      },
+      data: { status: "pending" },
+    });
+    if (reclaimed.count > 0) {
+      console.log(`[scheduler] 回收 ${reclaimed.count} 个卡住的中间态任务 → pending`);
+    }
+  } catch (err) {
+    console.error("[scheduler] 回收失败:", err instanceof Error ? err.message : err);
+  }
+
   let pending: Task[];
   try {
     pending = await prisma.task.findMany({
@@ -63,13 +82,39 @@ async function tick() {
     getEventBus().publish(task.id, { status: "parsing" });
 
     running++;
-    void processTask(task).finally(() => {
+    // P2：单任务超时守卫。到点把任务置 failed（防占死并发槽），并置 ctrl.cancelled
+    // 让 processTask 在长操作返回后放弃落库 done，避免覆盖 failed 状态。
+    const ctrl = { cancelled: false };
+    const timer = setTimeout(() => void onTaskTimeout(task, ctrl), TASK_TIMEOUT_MS);
+    void processTask(task, ctrl).finally(() => {
+      clearTimeout(timer);
       running--;
     });
   }
 }
 
-async function processTask(task: Task) {
+/** 单任务超时处理：仅当任务尚未终态时才置 failed（done/failed 不被覆盖） */
+async function onTaskTimeout(task: Task, ctrl: { cancelled: boolean }) {
+  ctrl.cancelled = true;
+  try {
+    const cur = await prisma.task.findUnique({
+      where: { id: task.id },
+      select: { status: true },
+    });
+    if (cur && cur.status !== "done" && cur.status !== "failed") {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { status: "failed", errorMessage: `任务超时（>${TASK_TIMEOUT_MS / 1000}s 未结束）` },
+      });
+      getEventBus().publish(task.id, { status: "failed", errorMessage: "任务超时" });
+      console.error(`[scheduler] 任务 ${task.id} 超时，标记 failed`);
+    }
+  } catch (err) {
+    console.error("[scheduler] 超时处理失败:", err instanceof Error ? err.message : err);
+  }
+}
+
+async function processTask(task: Task, ctrl: { cancelled: boolean }) {
   const repo = await prisma.repository.findUnique({ where: { id: task.repoId } });
   if (!repo) {
     await prisma.task.update({
@@ -97,6 +142,9 @@ async function processTask(task: Task) {
       cache,
     });
 
+    // P2：已被超时中断则放弃后续步骤与落库 done，保留 failed 状态
+    if (ctrl.cancelled) return;
+
     // M3b：规则引擎判为 uncertain 的变更送 AI 语义引擎二次判定（无 key / 失败自动降级）
     await enrichUncertain(output.result);
 
@@ -107,6 +155,9 @@ async function processTask(task: Task) {
     getEventBus().publish(task.id, { status: "reporting" });
 
     await persistSymbolTable(task.repoId, output.symbolTable);
+
+    // P2：双保险——若中途被超时取消，跳过最终 done 落库（保留已标记的 failed）
+    if (ctrl.cancelled) return;
 
     await prisma.task.update({
       where: { id: task.id },

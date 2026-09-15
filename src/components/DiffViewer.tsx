@@ -18,7 +18,11 @@ const DiffEditor = dynamic(
   () => import("@monaco-editor/react").then((m) => m.DiffEditor),
   {
     ssr: false,
-    loading: () => <div className="empty">Diff 视图加载中…</div>,
+    loading: () => (
+      <div className="p-6 text-center text-sm text-muted-foreground">
+        Diff 视图加载中…
+      </div>
+    ),
   },
 );
 
@@ -58,46 +62,66 @@ export default function DiffViewer({ diffs }: { diffs: FileDiff[] }) {
   const current = diffs[idx];
 
   return (
-    <div className="diff-viewer">
-      <div className="diff-file-list" role="tablist" aria-label="变更文件">
-        {diffs.map((d, i) => (
-          <button
-            key={d.path}
-            type="button"
-            role="tab"
-            aria-selected={i === idx}
-            className={`diff-file ${i === idx ? "active" : ""}`}
-            onClick={() => setSelected(i)}
-            title={d.path}
-          >
-            <span className={`tag ${d.status}`}>{STATUS_MARK[d.status]}</span>
-            <span className="diff-file-name">{d.path}</span>
-          </button>
-        ))}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <h2 className="text-base font-semibold tracking-tight">
+          代码 Diff
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          变更文件的 base（左）与 head（右）逐行对比。
+        </p>
       </div>
-
-      <div className="diff-pane">
-        <div className="diff-pane-head mono">
-          {current.path}{" "}
-          <span className="muted">
-            （{current.status === "added" ? "新增" : current.status === "deleted" ? "删除" : "修改"}）
-          </span>
+      
+      <div className="border border-border/50 rounded-lg overflow-hidden">
+        <div className="flex border-b border-border/30 bg-muted/50">
+          {diffs.map((d, i) => (
+            <button
+              key={d.path}
+              type="button"
+              role="tab"
+              aria-selected={i === idx}
+              className={`
+                flex-1 px-4 py-3 text-xs font-medium text-muted-foreground
+                transition-all duration-200
+                ${i === idx
+                  ? "text-primary border-b-2 border-primary"
+                  : "hover:text-muted-foreground/80 hover:bg-muted/30"}
+              `}
+              onClick={() => setSelected(i)}
+              title={d.path}
+            >
+              <span className={`mr-2 inline-flex h-3 w-3 items-center justify-center rounded-full ${
+                d.status === "added"
+                  ? "bg-emerald-500 text-emerald-50"
+                  : d.status === "deleted"
+                    ? "bg-rose-500 text-rose-50"
+                    : "bg-muted/50 text-muted-foreground"
+              }`}>
+                {STATUS_MARK[d.status]}
+              </span>
+              <span className="truncate max-w-[120px]">{d.path}</span>
+            </button>
+          ))}
         </div>
-        <DiffEditor
-          original={current.oldContent}
-          modified={current.newContent}
-          language={inferLanguage(current.path)}
-          height="520px"
-          options={{
-            readOnly: true,
-            renderSideBySide: true,
-            minimap: { enabled: false },
-            fontSize: 13,
-            scrollBeyondLastLine: false,
-            folding: true,
-            lineNumbersMinChars: 3,
-          }}
-        />
+        
+        <div className="flex h-[520px]">
+          <DiffEditor
+            original={current.oldContent}
+            modified={current.newContent}
+            language={inferLanguage(current.path)}
+            theme="vs-dark"
+            height="520px"
+            options={{
+              readOnly: true,
+              renderSideBySide: true,
+              minimap: { enabled: false },
+              fontSize: 13,
+              scrollBeyondLastLine: false,
+              folding: true,
+              lineNumbersMinChars: 3,
+            }}
+          />
+        </div>
       </div>
     </div>
   );
