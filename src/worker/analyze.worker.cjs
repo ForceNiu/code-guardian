@@ -4,7 +4,10 @@
 // 纯函数（解析/符号提取/diff/严重度）已抽到 analyze-core.cjs，供单测复用。
 
 const { parentPort, workerData } = require("node:worker_threads");
-const { execSync } = require("node:child_process");
+// P4：用 execFileSync + 参数数组，绝不做 shell 字符串拼接——
+// ① gitUrl/ref/file 直接作参数，不经 shell 解析 → 消除命令注入；
+// ② timeout 到点 kill → 防 git 挂起把任务卡死。
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const {
@@ -14,15 +17,23 @@ const {
   resolveImport,
   diffSymbols,
   resolveFileSymbols,
+  resolveExportOrigin,
 } = require("./analyze-core.cjs");
 const { runRules } = require("./rules.cjs");
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".cache", "coverage"]);
 
-/** 执行 git 命令，失败返回 null（不抛，交由调用方判断） */
-function git(cmd, cwd) {
+/** 执行 git 命令，失败/超时返回 null（不抛，交由调用方判断）。
+ *  参数始终以数组传入（execFileSync），不经 shell，杜绝注入。 */
+const GIT_TIMEOUT_MS = 120000;
+function git(args, cwd) {
   try {
-    return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: GIT_TIMEOUT_MS,
+    });
   } catch {
     return null;
   }
@@ -33,18 +44,18 @@ function ensureRepo(gitUrl, workdir) {
   fs.mkdirSync(workdir, { recursive: true });
   const isCloned = fs.existsSync(path.join(workdir, ".git"));
   if (!isCloned) {
-    git(`git clone --quiet "${gitUrl}" "${workdir}"`, process.cwd());
+    git(["clone", "--quiet", gitUrl, workdir], process.cwd());
     if (!fs.existsSync(path.join(workdir, ".git"))) {
       throw new Error(`git clone 失败: ${gitUrl}`);
     }
   } else {
-    git(`git -C "${workdir}" fetch --quiet --all --prune`, process.cwd());
+    git(["-C", workdir, "fetch", "--quiet", "--all", "--prune"], process.cwd());
   }
 }
 
 /** 切换到 headRef（detached HEAD），保证工作区文件 = head 状态，供读取新代码全文 */
 function checkoutHead(headRef, workdir) {
-  const out = git(`git -C "${workdir}" checkout --force --quiet "${headRef}"`, workdir);
+  const out = git(["-C", workdir, "checkout", "--force", "--quiet", headRef], workdir);
   if (out == null) {
     throw new Error(`git checkout 失败：headRef ${headRef} 不可达`);
   }
@@ -52,7 +63,7 @@ function checkoutHead(headRef, workdir) {
 
 /** 变更文件列表（git diff base...head --name-only） */
 function changedFiles(baseRef, headRef, workdir) {
-  const out = git(`git -C "${workdir}" diff --name-only ${baseRef}...${headRef}`, workdir);
+  const out = git(["-C", workdir, "diff", "--name-only", `${baseRef}...${headRef}`], workdir);
   if (out == null) {
     throw new Error(`git diff 失败：baseRef/headRef 不可达，请检查引用`);
   }
@@ -99,16 +110,23 @@ function main() {
   );
   const changedSet = new Set(changed);
 
+  // 已从 head 删除、但 base 里存在的文件。必须一并纳入 import 解析范围：
+  // 否则「删掉一个被广泛引用的文件」时 resolveImport 解析不到目标 → 引用方注册不上
+  // → impactedFiles 为空 → 规则引擎把 removed 从 high 误降为 medium（漏报破坏性变更）。
+  const baseOnlyFiles = new Set(changed.filter((f) => !allFiles.has(f)));
+  const resolvableFiles = baseOnlyFiles.size > 0 ? new Set([...allFiles, ...baseOnlyFiles]) : allFiles;
+
   // 1) 解析：变更文件重解析；未变更文件命中增量缓存则复用，否则解析
   const exportsByFile = new Map();
   const importsByFile = new Map();
+  const reexportsByFile = new Map(); // barrel 转发边：file -> [{ source, line }]
   const hashByFile = new Map();
   let cacheHits = 0;
   for (const file of allFiles) {
     const content = fs.readFileSync(path.join(workdir, file), "utf8");
     const hash = md5(content);
     hashByFile.set(file, hash);
-    const { exports, imports, hitCache } = resolveFileSymbols(
+    const { exports, imports, reexports, hitCache } = resolveFileSymbols(
       file,
       changedSet.has(file),
       content,
@@ -118,15 +136,26 @@ function main() {
     if (hitCache) cacheHits++;
     exportsByFile.set(file, exports);
     importsByFile.set(file, imports);
+    reexportsByFile.set(file, reexports || []);
   }
 
-  // 2) 反向索引：`${file}#${symbol}` -> 引用它的文件列表
+  // 2) 穿透 barrel：把 import 的目标文件解析到「真正定义该符号的文件」。
+  //    处理 `export * from "./real"` 转发——否则重命名/删除 real.ts 里的符号时，
+  //    import 方注册在 barrel 上（barrel#name），而变更符号在 real.ts，影响链路查不到。
+  //    实现见 analyze-core.cjs 的 resolveExportOrigin（纯函数，可单测）。
+  const originOf = (targetFile, name) =>
+    resolveExportOrigin(targetFile, name, exportsByFile, reexportsByFile, resolvableFiles);
+
+  // 3) 反向索引：`${file}#${symbol}` -> 引用它的文件列表
+  //    经 resolveExportOrigin 归一：barrel 转发的 import 记到定义文件上，
+  //    这样「定义文件符号变更 → 找到跨 barrel 的引用方」链路才成立。
   const reverseIndex = new Map();
   for (const [importer, imports] of importsByFile) {
     for (const imp of imports) {
-      const targetFile = resolveImport(imp.source, importer, allFiles);
+      const targetFile = resolveImport(imp.source, importer, resolvableFiles);
       if (!targetFile) continue;
-      const key = `${targetFile}#${imp.name}`;
+      const origin = originOf(targetFile, imp.name) || targetFile;
+      const key = `${origin}#${imp.name}`;
       if (!reverseIndex.has(key)) reverseIndex.set(key, []);
       if (!reverseIndex.get(key).includes(importer)) reverseIndex.get(key).push(importer);
     }
@@ -139,7 +168,7 @@ function main() {
   for (const file of changed) {
     const existsInHead = allFiles.has(file);
     const newExports = existsInHead ? exportsByFile.get(file) || [] : [];
-    const oldContent = git(`git -C "${workdir}" show ${baseRef}:"${file}"`, workdir);
+    const oldContent = git(["-C", workdir, "show", `${baseRef}:"${file}"`], workdir);
     const oldExports = oldContent != null ? parseFile(oldContent).exports : [];
 
     let status = "modified";
@@ -181,7 +210,7 @@ function main() {
     low: impactChain.filter((i) => i.severity === "low").length,
   };
 
-  // 6) 符号缓存表（供主线程持久化到 file_snapshots + export_symbols）
+  // 7) 符号缓存表（供主线程持久化到 file_snapshots + export_symbols）
   const symbolTable = [];
   for (const [file, exports] of exportsByFile) {
     const hash = hashByFile.get(file);
@@ -197,6 +226,7 @@ function main() {
       symbols,
       exports,
       imports: importsByFile.get(file) || [],
+      reexports: reexportsByFile.get(file) || [],
     });
   }
 

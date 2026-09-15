@@ -12,6 +12,7 @@ const {
   resolveImport,
   diffSymbols,
   resolveFileSymbols,
+  resolveExportOrigin,
 } = require("../src/worker/analyze-core.cjs");
 
 test("md5 返回标准哈希", () => {
@@ -70,8 +71,8 @@ test("nodeKind 提取函数参数类型 / 可选 / 返回类型", () => {
     type: "function",
     paramCount: 2,
     params: [
-      { type: "string", optional: false },
-      { type: "number", optional: true },
+      { type: "string", optional: false, name: "id" },
+      { type: "number", optional: true, name: "opt" },
     ],
     returnType: "void",
     async: false,
@@ -118,8 +119,8 @@ test("parseFile 提取导出符号与 import", () => {
       line: 3,
       paramCount: 2,
       params: [
-        { type: "number", optional: false },
-        { type: "number", optional: false },
+        { type: "number", optional: false, name: "v" },
+        { type: "number", optional: false, name: "c" },
       ],
     },
     { name: "TAX", type: "variable", line: 4 },
@@ -147,8 +148,8 @@ test("parseFile 提取函数参数类型 / 可选 / 返回类型 / async", () =>
       line: 1,
       paramCount: 2,
       params: [
-        { type: "string", optional: false },
-        { type: "number", optional: true },
+        { type: "string", optional: false, name: "a" },
+        { type: "number", optional: true, name: "b" },
       ],
       returnType: "Promise<void>",
     },
@@ -157,9 +158,9 @@ test("parseFile 提取函数参数类型 / 可选 / 返回类型 / async", () =>
 });
 
 test("parseFile 对空代码 / 非法代码安全降级为空", () => {
-  assert.deepEqual(parseFile(""), { exports: [], imports: [] });
-  assert.deepEqual(parseFile("   "), { exports: [], imports: [] });
-  assert.deepEqual(parseFile("const = = 语法错误"), { exports: [], imports: [] });
+  assert.deepEqual(parseFile(""), { exports: [], imports: [], reexports: [] });
+  assert.deepEqual(parseFile("   "), { exports: [], imports: [], reexports: [] });
+  assert.deepEqual(parseFile("const = = 语法错误"), { exports: [], imports: [], reexports: [] });
 });
 
 test("resolveImport 解析相对路径并补全扩展名", () => {
@@ -566,4 +567,127 @@ test("diffSymbols 识别 class 成员变更（modified）", () => {
       line: 1,
     },
   ]);
+});
+
+// ---- M3a-2 增强：barrel 转发 / 嵌套对象类型 / 直接重命名 ----
+
+test("parseFile 记录 export * 转发边（reexports）", () => {
+  const code = [
+    'export * from "./real";',
+    'export { a, b as c } from "./other";',
+    "export const x = 1;",
+  ].join("\n");
+  const { exports, reexports } = parseFile(code);
+  assert.deepEqual(reexports, [{ source: "./real", line: 1 }]);
+  // 具名转发仍走 exports（导出名 + local 绑定），不透传到 reexports
+  const c = exports.find((e) => e.name === "c");
+  assert.equal(c.type, "reexport");
+  assert.equal(c.localName, "b");
+});
+
+test("parseFile 嵌套对象类型展开为字段类型文本", () => {
+  const code = [
+    "export interface Outer {",
+    "  meta: { id: number; tag?: string };",
+    "  name: string;",
+    "}",
+  ].join("\n");
+  const { exports } = parseFile(code);
+  const outer = exports.find((e) => e.name === "Outer");
+  const meta = outer.fields.find((f) => f.name === "meta");
+  // 成员按名排序 + 可选标记保留，保证签名稳定可比对
+  assert.equal(meta.type, "{id:number,tag?:string}");
+});
+
+test("diffSymbols 识别直接符号重命名（恰好一删一增 + 同类型同签名）", () => {
+  const file = "src/util.ts";
+  const o = { name: "foo", type: "function", line: 1, params: [], returnType: "", async: false };
+  const n = { name: "bar", type: "function", line: 1, params: [], returnType: "", async: false };
+  const out = diffSymbols(file, [o], [n]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].changeType, "renamed");
+  assert.equal(out[0].symbol, "foo");
+  assert.equal(out[0].newName, "bar");
+});
+
+test("diffSymbols 不误配：两个增删同签名符号时保持 removed/added", () => {
+  const file = "src/util.ts";
+  const a = { name: "a", type: "function", line: 1, params: [], returnType: "", async: false };
+  const b = { name: "b", type: "function", line: 2, params: [], returnType: "", async: false };
+  const c = { name: "c", type: "function", line: 1, params: [], returnType: "", async: false };
+  const d = { name: "d", type: "function", line: 2, params: [], returnType: "", async: false };
+  const out = diffSymbols(file, [a, b], [c, d]);
+  assert.equal(out.filter((x) => x.changeType === "renamed").length, 0);
+  assert.equal(out.filter((x) => x.changeType === "removed").length, 2);
+  assert.equal(out.filter((x) => x.changeType === "added").length, 2);
+});
+
+// ---- barrel 穿透：resolveExportOrigin ----
+
+test("resolveExportOrigin 直接定义即返回自身", () => {
+  const exportsByFile = new Map([["src/real.ts", [{ name: "foo", type: "function" }]]]);
+  const reexportsByFile = new Map();
+  const files = new Set(["src/real.ts"]);
+  assert.equal(
+    resolveExportOrigin("src/real.ts", "foo", exportsByFile, reexportsByFile, files),
+    "src/real.ts",
+  );
+});
+
+test("resolveExportOrigin 穿透 export * 到定义文件", () => {
+  const exportsByFile = new Map([
+    ["src/barrel.ts", []], // barrel 自身不定义符号
+    ["src/real.ts", [{ name: "foo", type: "function" }]],
+  ]);
+  const reexportsByFile = new Map([["src/barrel.ts", [{ source: "./real", line: 1 }]]]);
+  const files = new Set(["src/barrel.ts", "src/real.ts"]);
+  assert.equal(
+    resolveExportOrigin("src/barrel.ts", "foo", exportsByFile, reexportsByFile, files),
+    "src/real.ts",
+  );
+});
+
+test("resolveExportOrigin 支持多级 barrel 链", () => {
+  const exportsByFile = new Map([["src/deep/real.ts", [{ name: "foo", type: "function" }]]]);
+  const reexportsByFile = new Map([
+    ["src/index.ts", [{ source: "./mid", line: 1 }]],
+    ["src/mid.ts", [{ source: "./deep/real", line: 1 }]],
+    ["src/deep/real.ts", []],
+  ]);
+  const files = new Set(["src/index.ts", "src/mid.ts", "src/deep/real.ts"]);
+  assert.equal(
+    resolveExportOrigin("src/index.ts", "foo", exportsByFile, reexportsByFile, files),
+    "src/deep/real.ts",
+  );
+});
+
+test("resolveExportOrigin 循环转发不死循环（a -> b -> a）", () => {
+  const exportsByFile = new Map([
+    ["src/a.ts", []],
+    ["src/b.ts", []],
+  ]);
+  const reexportsByFile = new Map([
+    ["src/a.ts", [{ source: "./b", line: 1 }]],
+    ["src/b.ts", [{ source: "./a", line: 1 }]],
+  ]);
+  const files = new Set(["src/a.ts", "src/b.ts"]);
+  assert.equal(resolveExportOrigin("src/a.ts", "foo", exportsByFile, reexportsByFile, files), null);
+});
+
+test("resolveExportOrigin 符号不存在时返回 null", () => {
+  const exportsByFile = new Map([["src/real.ts", [{ name: "bar", type: "function" }]]]);
+  const reexportsByFile = new Map();
+  const files = new Set(["src/real.ts"]);
+  assert.equal(resolveExportOrigin("src/real.ts", "foo", exportsByFile, reexportsByFile, files), null);
+});
+
+test("resolveExportOrigin 可穿透到 base 侧已删除文件（删除文件的引用方不漏报）", () => {
+  // real.ts 在 head 已删 → exportsByFile 无它，但 files 集合把它纳入解析范围
+  const exportsByFile = new Map();
+  const reexportsByFile = new Map();
+  const files = new Set(["src/consumer.ts", "src/deleted.ts"]);
+  assert.equal(
+    resolveExportOrigin("src/deleted.ts", "anything", exportsByFile, reexportsByFile, files),
+    null, // 无导出可查 → null，调用方回退到 targetFile 本身，引用方仍被登记
+  );
 });

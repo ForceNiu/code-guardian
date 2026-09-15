@@ -58,7 +58,25 @@ function typeToString(t) {
     case "TSTupleType": return `[${(t.elementTypes || []).map(typeToString).join(", ")}]`;
     case "TSFunctionType": return "fn";
     case "TSParenthesizedType": return `(${typeToString(t.typeAnnotation)})`;
-    case "TSTypeLiteral": return "{...}";
+    case "TSTypeLiteral": {
+      // 嵌套对象字面量：递归展开成员（按 name 排序，保证顺序稳定），
+      // 使「只改内层字段」也能反映到 signature，避免漏检。
+      const members = (t.members || [])
+        .filter((m) => m.type === "TSPropertySignature" || m.type === "TSMethodSignature")
+        .map((m) => {
+          const key = m.key;
+          const name = key && key.name !== undefined ? key.name : key && key.value;
+          const ty =
+            m.type === "TSPropertySignature"
+              ? m.typeAnnotation
+                ? typeToString(m.typeAnnotation.typeAnnotation)
+                : ""
+              : "fn";
+          return { name: String(name), ty, optional: !!m.optional };
+        })
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      return `{${members.map((m) => `${m.name}${m.optional ? "?" : ""}:${m.ty}`).join(",")}}`;
+    }
     case "TSOptionalType": return `${typeToString(t.typeAnnotation)}?`;
     case "TSRestType": return `...${typeToString(t.typeAnnotation)}`;
     case "TSTypeOperator": return `${t.operator || ""} ${typeToString(t.typeAnnotation)}`.trim();
@@ -67,33 +85,31 @@ function typeToString(t) {
   }
 }
 
-/** 提取函数参数细节（类型 + 是否可选） */
+/** 提取函数参数细节（名称 + 类型 + 是否可选）；名称供规则引擎按名对齐（识别中间插入/删除） */
 function extractParams(node) {
   if (!node.params) return [];
   return node.params.map((p) => {
+    let name;
+    if (p.type === "Identifier") name = p.name;
+    else if (p.type === "AssignmentPattern") name = p.left && p.left.name;
+    else if (p.type === "RestElement") name = p.argument && p.argument.name;
+    const base = { type: "", optional: false };
+    if (name != null) base.name = name;
     if (p.type === "Identifier") {
-      return {
-        type: p.typeAnnotation ? typeToString(p.typeAnnotation.typeAnnotation) : "",
-        optional: !!p.optional,
-      };
-    }
-    if (p.type === "AssignmentPattern") {
+      base.type = p.typeAnnotation ? typeToString(p.typeAnnotation.typeAnnotation) : "";
+      base.optional = !!p.optional;
+    } else if (p.type === "AssignmentPattern") {
       // 带默认值 = 可省略
       const left = p.left;
-      return {
-        type: left && left.typeAnnotation ? typeToString(left.typeAnnotation.typeAnnotation) : "",
-        optional: true,
-      };
+      base.type = left && left.typeAnnotation ? typeToString(left.typeAnnotation.typeAnnotation) : "";
+      base.optional = true;
+    } else if (p.type === "RestElement") {
+      base.type = p.typeAnnotation ? typeToString(p.typeAnnotation.typeAnnotation) : "";
+      base.optional = false;
+      base.rest = true;
     }
-    if (p.type === "RestElement") {
-      return {
-        type: p.typeAnnotation ? typeToString(p.typeAnnotation.typeAnnotation) : "",
-        optional: false,
-        rest: true,
-      };
-    }
-    // 解构 / 复杂模式：暂不追踪类型
-    return { type: "", optional: false };
+    // 解构 / 复杂模式：暂不追踪类型（name 也可能无，留空）
+    return base;
   });
 }
 
@@ -233,7 +249,8 @@ function nodeKind(node) {
 function parseFile(code) {
   const exports = [];
   const imports = [];
-  if (!code || !code.trim()) return { exports, imports };
+  const reexports = []; // export * from "./x"（barrel 转发边，供影响图穿透到定义处）
+  if (!code || !code.trim()) return { exports, imports, reexports };
   let ast;
   try {
     ast = parser.parse(code, {
@@ -241,7 +258,7 @@ function parseFile(code) {
       plugins: ["typescript", "jsx"],
     });
   } catch {
-    return { exports, imports };
+    return { exports, imports, reexports };
   }
 
   traverse(ast, {
@@ -289,6 +306,12 @@ function parseFile(code) {
       const line = p.node.loc ? p.node.loc.start.line : 0;
       exports.push({ name: "default", type: "default", line });
     },
+    ExportAllDeclaration(p) {
+      // export * from "./x"：记录 barrel 转发边（无具名 specifier），供反向索引穿透
+      const line = p.node.loc ? p.node.loc.start.line : 0;
+      const source = p.node.source && p.node.source.value;
+      if (source) reexports.push({ source, line });
+    },
     ImportDeclaration(p) {
       const line = p.node.loc ? p.node.loc.start.line : 0;
       const source = p.node.source.value;
@@ -302,7 +325,7 @@ function parseFile(code) {
     },
   });
 
-  return { exports, imports };
+  return { exports, imports, reexports };
 }
 
 /** 把相对导入说明符解析成仓库内文件路径（补全扩展名 / index），无法解析返回 null */
@@ -400,14 +423,15 @@ function pairRenameExports(changed) {
   const added = changed.filter(
     (c) => c.changeType === "added" && c.newSymbol && c.newSymbol.type === "reexport" && c.newSymbol.localName
   );
-  if (!removed.length || !added.length) return changed;
 
   const result = [];
   const pairedAdded = new Set();
+  const pairedRemoved = new Set();
   for (const r of removed) {
     const a = added.find((x) => !pairedAdded.has(x) && x.newSymbol.localName === r.oldSymbol.localName);
     if (a) {
       pairedAdded.add(a);
+      pairedRemoved.add(r);
       result.push({
         file: r.file,
         symbol: r.symbol, // 旧导出名
@@ -420,15 +444,43 @@ function pairRenameExports(changed) {
         newSymbol: a.newSymbol,
         line: a.line,
       });
-    } else {
-      result.push(r); // 无配对的 removed 保留原样
     }
   }
+  // 未配对的 removed（含非 reexport）与其余变更原样保留，避免「有配对就丢件」
   for (const c of changed) {
-    if (c.changeType === "removed") continue; // removed 已在上面对待
-    if (c.changeType === "added" && pairedAdded.has(c)) continue; // 已配对成 renamed
+    if (pairedAdded.has(c) || pairedRemoved.has(c)) continue;
     result.push(c);
   }
+
+  // 直接符号重命名（非 re-export）：如 export function foo → export function bar。
+  // 保守判定：整份变更里「恰好 1 删 + 1 增」、同为非 reexport/default、符号类型相同且签名相同
+  // → 合并为一条 changeType="renamed"（避免多个同签名符号互相误配）。
+  const dirRemoved = result.filter(
+    (c) => c.changeType === "removed" && c.oldSymbol && c.oldSymbol.type !== "reexport" && c.oldSymbol.type !== "default"
+  );
+  const dirAdded = result.filter(
+    (c) => c.changeType === "added" && c.newSymbol && c.newSymbol.type !== "reexport" && c.newSymbol.type !== "default"
+  );
+  if (dirRemoved.length === 1 && dirAdded.length === 1) {
+    const r = dirRemoved[0];
+    const a = dirAdded[0];
+    if (r.oldSymbol.type === a.newSymbol.type && r.oldSignature === a.newSignature) {
+      result.splice(result.indexOf(r), 1);
+      result.splice(result.indexOf(a), 1);
+      result.push({
+        file: r.file,
+        symbol: r.symbol, // 旧名
+        newName: a.symbol, // 新名
+        changeType: "renamed",
+        oldSignature: r.oldSignature,
+        newSignature: a.newSignature,
+        oldSymbol: r.oldSymbol,
+        newSymbol: a.newSymbol,
+        line: a.line,
+      });
+    }
+  }
+
   return result;
 }
 
@@ -436,18 +488,54 @@ function pairRenameExports(changed) {
  * 决定某文件的导出符号 + import 用缓存还是重新解析（增量缓存核心判断，纯函数）。
  * - 变更文件：始终重新解析（内容变了，缓存不可信）
  * - 未变更文件：内容哈希命中缓存则复用，否则解析
- * 返回 { exports, imports, hitCache }。
+ * 返回 { exports, imports, reexports, hitCache }。
  */
 function resolveFileSymbols(file, isChanged, content, hash, cache) {
   if (!isChanged && cache && cache.hashByFile && cache.hashByFile[file] === hash) {
     return {
       exports: cache.exportsByFile[file] || [],
       imports: cache.importsByFile[file] || [],
+      reexports: (cache.reexportsByFile && cache.reexportsByFile[file]) || [],
       hitCache: true,
     };
   }
   const parsed = parseFile(content);
-  return { exports: parsed.exports, imports: parsed.imports, hitCache: false };
+  return {
+    exports: parsed.exports,
+    imports: parsed.imports,
+    reexports: parsed.reexports,
+    hitCache: false,
+  };
+}
+
+/**
+ * 沿 barrel 转发边解析「符号真正被定义的文件」。
+ *
+ * 场景：`consumer.ts` → `import { foo } from "./barrel"`，而 `barrel.ts` 只写
+ * `export * from "./real"`，`foo` 实际定义在 `real.ts`。
+ * 若不做穿透，反向索引会把 consumer 注册在 `barrel#foo` 上，而变更符号来自
+ * `real.ts#foo` → 影响链路查不到引用方（核心卖点直接失效）。
+ *
+ * @param {string} targetFile import 直接指向的文件
+ * @param {string} name       符号名
+ * @param {Map<string, Array>} exportsByFile     file -> 导出符号
+ * @param {Map<string, Array>} reexportsByFile   file -> [{ source, line }] 转发边
+ * @param {Set<string>} files  可解析的文件全集（含 base 侧已删除文件）
+ * @param {Set<string>} [seen] 递归访问集，用于截断循环转发（a → b → a）
+ * @returns {string|null} 定义文件路径；解析不到返回 null
+ */
+function resolveExportOrigin(targetFile, name, exportsByFile, reexportsByFile, files, seen) {
+  const visited = seen || new Set();
+  if (!targetFile || visited.has(targetFile)) return null;
+  const defined = (exportsByFile.get(targetFile) || []).some((s) => s.name === name);
+  if (defined) return targetFile;
+  visited.add(targetFile);
+  for (const re of reexportsByFile.get(targetFile) || []) {
+    const next = resolveImport(re.source, targetFile, files);
+    const origin = resolveExportOrigin(next, name, exportsByFile, reexportsByFile, files, visited);
+    if (origin) return origin;
+  }
+  return null;
 }
 
 module.exports = {
@@ -465,4 +553,5 @@ module.exports = {
   diffSymbols,
   pairRenameExports,
   resolveFileSymbols,
+  resolveExportOrigin,
 };

@@ -568,3 +568,45 @@ test("classifyClassChange 直接分类", () => {
   );
   assert.equal(classifyClassChange(classSym([member("a")]), classSym([member("a")])), "unknown");
 });
+
+// 参数名感知对齐（P5 修复）：识别「中间插入/删除必填参数」这类破坏性变更
+function fnNamed(pdefs) {
+  return { name: "f", type: "function", line: 1, params: pdefs.map((p) => ({ ...p })) };
+}
+
+test("中间插入必填参数 → addedRequiredParam（high/proven）", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: fnNamed([{ name: "a", type: "number" }, { name: "b", type: "string" }]),
+    newSymbol: fnNamed([{ name: "a", type: "number" }, { name: "c", type: "boolean" }, { name: "b", type: "string" }]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("中间插入可选参数 → addedOptionalParam（low/proven）", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: fnNamed([{ name: "a", type: "number" }, { name: "b", type: "string" }]),
+    newSymbol: fnNamed([{ name: "a", type: "number" }, { name: "c", type: "boolean", optional: true }, { name: "b", type: "string" }]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "low", confidence: "proven" });
+});
+
+test("中间删除参数 → removedParam（high/proven）", () => {
+  const cs = {
+    changeType: "modified",
+    oldSymbol: fnNamed([{ name: "a", type: "number" }, { name: "b", type: "string" }, { name: "c", type: "boolean" }]),
+    newSymbol: fnNamed([{ name: "a", type: "number" }, { name: "c", type: "boolean" }]),
+  };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("重命名导出 → high/proven（下游 import 旧名即崩）", () => {
+  const cs = { changeType: "renamed", symbol: "oldName", newName: "newName" };
+  assert.deepEqual(runRules(cs, 0), { severity: "high", confidence: "proven" });
+});
+
+test("重命名导出即使零引用也保持 high/proven（语义即破坏性）", () => {
+  const cs = { changeType: "renamed", symbol: "a", newName: "b" };
+  assert.deepEqual(runRules(cs, 99), { severity: "high", confidence: "proven" });
+});
