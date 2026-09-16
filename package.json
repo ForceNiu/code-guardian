@@ -16,6 +16,7 @@
     "prisma:studio": "prisma studio",
     "seed": "tsx --env-file=.env prisma/seed.ts",
     "fixture": "bash scripts/create-fixture.sh",
+    "scan": "node scripts/scan-repo.cjs",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down"
   },
