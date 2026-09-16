@@ -26,6 +26,14 @@ const DEEPSEEK_REASONING_EFFORT: "low" | "high" | "max" = "low";
 
 type LLMMessage = { content?: unknown; _getType?: () => string; role?: string };
 
+/**
+ * 确定性错误（4xx，429 除外）：模型名 / 参数 / 鉴权类问题，**重试不会改变结果**。
+ * 建独立类的唯一目的，是让下面的 catch 块能认出它并「直接上抛、不进退避轮次」——
+ * 否则一个必然失败的 400 会白烧 3 次请求与 ~3.5s 退避。
+ * 5xx 与网络异常**不**用这个类（它们是临时的，重试有意义）。
+ */
+class NonRetryableError extends Error {}
+
 /** 把 LangChain 消息（string 或 Message[]）转成 DeepSeek 的 { role, content }[] */
 function toDeepSeekMessages(input: unknown): { role: string; content: string }[] {
   if (typeof input === "string") return [{ role: "user", content: input }];
@@ -237,10 +245,18 @@ export class DeepSeekLLM {
           }
           throw lastErr;
         }
+        // 4xx（429 已在上面单独处理）是确定性错误：模型名 / 参数 / 鉴权问题，重试 4 次只是白烧
+        // 时间与额度 → 用 NonRetryableError 上抛，下面 catch 会立刻透传、不进退避轮次。
+        if (res.status >= 400 && res.status < 500) {
+          throw new NonRetryableError(`DeepSeek 返回 ${res.status}: ${res.body.slice(0, 200)}`);
+        }
+        // 5xx / 其他：视为服务端临时故障，走下面的 catch 退避重试
         throw new Error(`DeepSeek 返回 ${res.status}: ${res.body.slice(0, 200)}`);
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
         if (options?.signal?.aborted) throw err;
+        // 确定性错误直接透传：重试不会让 400 变成 200
+        if (err instanceof NonRetryableError) throw err;
         lastErr = err;
         console.error(`[LLM] 调用异常（第 ${attempt} 次）：${err.message}`);
         if (attempt < 4) {

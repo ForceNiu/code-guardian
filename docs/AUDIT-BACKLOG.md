@@ -75,7 +75,7 @@
 
 ---
 
-### 2026-09-17 第五批 · 全项目结构审计（分支 `chore/backlog-sync-e2e-rerun` 之上 · ⚠️ **改动在工作区完成，尚未提交**）
+### 2026-09-17 第五批 · 全项目结构审计（叠在 `chore/backlog-sync-e2e-rerun` 之上 · PR **#20** squash merge · **main = `3f804d43`**）
 
 **审计方法**（可复现）：脚本解析**真实 import 语句 + 用 `fs.existsSync` 解析路径**，覆盖 86 个入库文件 + 磁盘上未入库文件，两套独立脚本交叉验证。
 > ⚠️ 方法红线：**不能拿子串匹配判「有没有被引用」** —— `input.tsx` 会匹配到任意 `input`，注释/fixture 里的 `./x` `./barrel` `./real` 会被当成真导入。初版就是这么误报 16 条「失效导入」的，逐条核过全是误判。
@@ -95,7 +95,7 @@
 | 前 | 后 | 理由 |
 |---|---|---|
 | `src/worker/analyze-core.cjs`、`rules.cjs`、`analyze.worker.cjs` | **`worker/`（仓库顶层）** | 这三个不进 Next bundle、不参与 tsc，放在 `src/` 里靠 exclude 维持，边界不可见 |
-| `src/lib/run-analysis.ts` | **`src/lib/run-analysis.ts`** | 它**会**被 Next 打包（`scheduler.ts` import 它），本质是 `lib`；放在 `worker/` 只会强化误解 |
+| `src/worker/run-analysis.ts` | **`src/lib/run-analysis.ts`** | 它**会**被 Next 打包（`scheduler.ts` import 它），本质是 `lib`；放在 `worker/` 只会强化误解 |
 
 - 搬迁前置核过：3 个 `.cjs` 内部只有相对 `require("./analyze-core.cjs")` / `require("./rules.cjs")`，**无 `__dirname` 依赖** → 整体移出 `src/` 不破坏内部引用。
 - 🔴 **同步点共 9 处**（改漏任何一处都是「运行时才挂」或「静默用旧路径」）：`src/lib/run-analysis.ts:23`（运行时字符串）、`scripts/scan-repo.cjs:38`（同上）、`tsconfig.json:42`（exclude）、`src/lib/scheduler.ts:4`、`tests/analyze-worker.test.cjs:20`、`tests/analyze-core.test.cjs:16,698`、`tests/rules.test.cjs:14`、`tests/run-analysis.test.ts:73,93`、`tests/scheduler.test.ts:152`。
@@ -306,9 +306,23 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 | # | 条目（含位置） | 动作 | 风险 / 为什么没顺手做 |
 |---|---|---|---|
-| **S6** | `.gitignore` 只覆盖 `.env` / `.env.local` / `.env*.local` / `*.bak`，**漏 `.env.*`** → `.env.production` / `.env.test` 不会被忽略 | 加 `.env.*`，**必须同时加 `!.env.example`** | 🔴 **这是个陷阱**：`.env.*` 会把 `.env.example` 一起忽略 → 静默不再跟踪。验收硬判据：`git check-ignore -v .env.example` **必须无输出**，且 `git ls-files .env.example` 仍有它。c 范围只含「记进台账」，未含改文件 |
+| ~~**S6**~~ | ✅ **2026-09-17 已修**。原 `.gitignore` 只覆盖 `.env` / `.env.local` / `.env*.local`，**漏 `.env.*`** → `.env.production` / `.env.test` 不会被忽略（部署时建一个就会被误提交） | 改为 `.env` + `.env.*` + `!.env.example`。`!.env.example` 必须在 `.env.*` **之后**才生效；旧 `.env*.local` 的语义被 `.env.*` 完全覆盖，故删掉冗余行 | ✅ 验收全过：`git check-ignore -v .env.example` **无输出**、`git ls-files .env.example` 仍有它；**7 种密钥形态全部被忽略**（`.env` / `.env.local` / `.env.production` / `.env.development` / `.env.test` / `.env.production.local` / `.env.development.local`）；旧 `.env*.local` 语义未丢 |
 | **S7** | `docs/reports/CODE_REVIEW_REPORT.md` 数字过期：正文写「全套 **118** case」「`scheduler` 仍无单测」（今 **237 pass** / scheduler **13 条**）。文件头**已有**勘误 banner，但未覆盖这两处 | 在该 banner 里补一行：「测试规模与 scheduler 状态以 README / 本台账为准」 | 历史件且日期已标，属「可信度优化」非「错误」；但评审会拿它跟 README 的数字对照 |
 | **S8** | `.env.example` 未列 `HTTP_PROXY` / `HTTPS_PROXY`，而 `deepseek.ts` **刻意读它**（绕开 undici 不读代理的坑），README 扩展指南还专门写了一段 | 加两行注释说明（可选，非密钥） | 同上 —— 代码在意、模板没写，属「文档没跟上设计」 |
+
+---
+
+### 7. 从「已完成」条目里漏出来的 2 条（2026-09-17 清点台账时查出 · **两条均已修**）
+
+> 这两条**不是新问题** —— 它们早被查出来了，但**写在「已完成」条目的证据正文里**
+> （C6 的验收证据、历史审查报告的 P6），没有进本节的清单。
+> **台账的职责是「不漏」，所以补进来。**
+> ⚠️ 由此暴露一个结构性风险：**「已完成」章节里的「诚实标注 / 暂不改」，一样是待办** —— 下次清点要专门扫一遍。
+
+| # | 条目（含代码位置） | 现状 / 来源 | 动作 |
+|---|---|---|---|
+| ~~**S9**~~ | ✅ **2026-09-17 已修**。原 `invoke` 的 `catch` **不区分「HTTP 错误」与「网络异常」** → 对「200 / 429 之外的所有状态」一律 `throw`，再被 catch 接住、照走 `if (attempt < 4)` 重试 → **4xx（400 模型名错 / 401 鉴权失败 / 404）也重试满 4 次**，白烧 3 次请求 + ~3.5s 退避。⚠️ **原描述把 500 也归为「确定性错误」是错的** —— 5xx 是服务端临时故障，重试才对 | 新增 `NonRetryableError` 类：**4xx（429 除外，429 已在上面单独处理）**抛它 → catch 里立刻透传、不进退避轮次。**5xx / 网络异常照旧重试（行为不变）** | ✅ 验收：新增 1 条断言「400 是确定性错误 → 不重试，只发 1 次请求」；全量 **238 pass / 0 fail**。**灵敏度验证**：注释掉透传守卫 → **恰好该条变红**（`not ok 108`）、其余 237 条全绿 → 还原后 SHA-256 逐字节一致 |
+| **S10** | `src/lib/scheduler.ts:182`：失败任务的 `errorMessage` 拼成 `${err.message}\n${err.stack?.slice(0, 500)}`，随后**落库（:185）+ 推 SSE（:187）** → 前端可读到内部堆栈 | 来源 `docs/reports/CODE_REVIEW_REPORT.md` P6（第 117 行）；该报告 §5.4 自己判定「非公网前提下内部可接受，仅作打磨项」 | 二选一：**保持现状**（则转入 §三 `won't fix` 并写明理由）/ 改为**只落服务端日志**、对 SSE 只发 `err.message`。⚠️ 若判定不做，请移入 §三，别让它挂在待做区 |
 
 ---
 
