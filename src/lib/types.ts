@@ -76,7 +76,14 @@ export interface ChangedSymbol {
   line: number;
 }
 
-/** 规则引擎置信度：proven=自身即证据可直接门禁 / heuristic=类型变但证明不了需复核 / uncertain=归不了类交 AI */
+/**
+ * 置信度三档（`proven` 是规则引擎专属，AI 不得产出，见 `semantic-graph.ts` 的 AIJudgement）：
+ * - `proven`    = 变更自身即证据，可直接作为门禁（**由确定性规则引擎 RULE_TABLE 产出**）
+ * - `heuristic` = 类型变但证明不了 / AI 的经验判断，需人工复核
+ * - `uncertain` = 归不了类，交 AI（AI 判定后仍可保持这一档）
+ * 🔴 2026-09-16：AI 侧 schema 已收窄，`proven` 现在**只能**来自规则引擎 —— 下游可安全地
+ * 把 `proven` 当作确定性结论使用（此前 AI 也能自称 proven，无法区分来源）。
+ */
 export type Confidence = "proven" | "heuristic" | "uncertain";
 
 /** 一条影响链路（谁改动了 → 影响了哪些文件） */

@@ -675,12 +675,13 @@ test("种类变化（function → const 箭头，参数不变）落 uncertain �
 // 检测侧同族断言见 tests/analyze-core.test.cjs 末尾（那一组证明「不是漏报」）。
 // 本条回答的是另一个问题：**检出来之后定级准不准**。
 //
-// ⚠️ 第 2、3 条当前断言的是【现有行为】，它们标记的是 **A3 缺口**：
-//    old 侧 0 参 → params 未挂到符号上 → isFunctionLike(old) = false
-//    → 进不了参数 heuristic → 恒定 low/uncertain → 每次变更都白烧一次 AI Token。
-//    修 A3（isFunctionLike 改判 paramCount !== undefined）后，这两条**必须变红**，
-//    并被【有意】改成 proven 系 —— 这就是 B3 存在的意义：把「改动的影响面」变成可见的。
+// ✅ A3 已于 2026-09-16 修复（`isFunctionLike` 补判 `sym.paramCount !== undefined`）。
+//    **修复过程本身就是这套样本集的价值兑现**：修之前这三条是这样的 ——
+//    第 1 条（具名函数）绿、第 2/3 条（default / const）断言的是 `low/uncertain`。
+//    改完 `rules.cjs` 后，第 2/3 条**如期变红**（不是意外挂掉），再【有意】翻面为 proven 系。
 //    没有这组断言，你分不清「A3 修好了 0 参这一族」和「顺手把别的族也改了」。
+//    🔵 附带结论：本条也守住了 A3「只能 OR、不能替换」的判据 —— 若谁把 params 判据换成
+//    paramCount 判据，第 1 条（有 params 无 paramCount）会立刻变红。
 // 第 1 条是**对照基准**（控制组）：具名函数同样 0 参，却能正确走参数规则 —— 不得回归。
 // ---------------------------------------------------------------------------
 
@@ -703,7 +704,7 @@ test("0 参 → 有参：具名函数走参数规则，high/proven（对照基�
   assert.equal(r.confidence, "proven");
 });
 
-test("0 参 → 有参：export default 导出落 low/uncertain（A3 缺口，修好后应改 proven 系）", () => {
+test("0 参 → 有参：export default 导出走参数规则，high/proven（A3 已修，原为缺口标记）", () => {
   const r = runRules(
     {
       changeType: "modified",
@@ -718,11 +719,11 @@ test("0 参 → 有参：export default 导出落 low/uncertain（A3 缺口，�
     },
     0,
   );
-  assert.equal(r.confidence, "uncertain");
-  assert.equal(r.severity, "low");
+  assert.equal(r.severity, "high");
+  assert.equal(r.confidence, "proven");
 });
 
-test("0 参 → 有参：const 箭头导出落 low/uncertain（A3 缺口，修好后应改 proven 系）", () => {
+test("0 参 → 有参：const 箭头导出走参数规则，high/proven（A3 已修，原为缺口标记）", () => {
   const r = runRules(
     {
       changeType: "modified",
@@ -737,7 +738,7 @@ test("0 参 → 有参：const 箭头导出落 low/uncertain（A3 缺口，修�
     },
     0,
   );
-  assert.equal(r.confidence, "uncertain");
-  assert.equal(r.severity, "low");
+  assert.equal(r.severity, "high");
+  assert.equal(r.confidence, "proven");
 });
 

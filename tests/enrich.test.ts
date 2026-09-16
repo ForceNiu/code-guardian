@@ -80,10 +80,12 @@ test("注入 null LLM 时降级，保留原 uncertain 结果", async () => {
 });
 
 test("AI 判定后合并 severity/confidence/suggestion 并重算 summary", async () => {
+  // ⚠️ 2026-09-16：mock 里 confidence 不能再写 "proven" —— AI 侧 schema 已收窄为
+  // heuristic/uncertain 两档（proven 属确定性规则引擎专属，见 semantic-graph.ts）。
   const predict = JSON.stringify({
     judgments: [
-      { index: 0, severity: "high", confidence: "proven", reason: "删除导出" },
-      { index: 1, severity: "low", confidence: "heuristic", reason: "新增可选参数" },
+      { index: 0, severity: "high", confidence: "heuristic", reason: "删除导出" },
+      { index: 1, severity: "low", confidence: "uncertain", reason: "新增可选参数" },
     ],
   });
   const suggest = JSON.stringify({
@@ -99,10 +101,10 @@ test("AI 判定后合并 severity/confidence/suggestion 并重算 summary", asyn
 
   // severity/confidence/suggestion 已合并
   assert.equal(result.impactChain[0].severity, "high");
-  assert.equal(result.impactChain[0].confidence, "proven");
+  assert.equal(result.impactChain[0].confidence, "heuristic");
   assert.equal(result.impactChain[0].suggestion, "改为废弃标记");
   assert.equal(result.impactChain[1].severity, "low");
-  assert.equal(result.impactChain[1].confidence, "heuristic");
+  assert.equal(result.impactChain[1].confidence, "uncertain");
   assert.equal(result.impactChain[1].suggestion, "无需处理");
 
   // summary 计数已按新 severity 重算

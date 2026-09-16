@@ -354,6 +354,18 @@ function parseFile(code) {
           if (name) {
             const sym = { name, type: "reexport", line };
             if (localName) sym.localName = localName;
+            // 🔴 2026-09-16 修复：`export { C as default }` / `export { C as x }`（**无 `from`**，
+            // 即导出的是本文件自己的绑定）此前只记 localName，signature() 输出 `reexport:C`
+            // —— base/head 两边完全相同 → diffSymbols 判「无变化」→ 本地函数的签名变化**静默漏报**。
+            // 与下方 `export default C`（裸标识符借 local 签名）是同一族问题：导出名不是本地名时丢签名。
+            // 修法：能解析到携带签名的本地声明就借其签名。
+            // ⚠️ type 必须保持 "reexport"：pairRenameExports 靠它识别「重命名导出」，
+            //    改成 function/default 会让 `export { C as x }` → `export { C as y }` 退化成 removed+added。
+            // ⚠️ 有 `from` 的跨模块转发**不借**：本文件没有它的声明，凭空造签名会制造假阳性。
+            if (localName && !node.source) {
+              const target = localDecls.get(localName);
+              if (isSignatureBearing(target)) attachKindInfo(sym, nodeKind(target));
+            }
             exports.push(sym);
           }
         }
@@ -365,6 +377,17 @@ function parseFile(code) {
       // default 导出此前签名恒为 "default"：内部任何破坏性变更都会被判为「无变化」而静默漏报。
       // Next.js 的 page / layout / route 几乎全是 `export default function`，必须提取签名。
       let decl = p.node.declaration;
+      // 🔴 2026-09-16 修复：HOC 包裹形态 `export default memo(X)` / `forwardRef(X)` / `connect(m)(X)`。
+      // 此前 declaration 是 CallExpression → isSignatureBearing() 不认 → 符号不带任何签名
+      // → **被包裹组件的 props 变化完全检测不到**（实测变更数 = 0）。React 里 memo/forwardRef 很常见。
+      // 保守解包：只沿 CallExpression 的**第一个实参**向下（限 5 层），取到标识符才继续借 local 声明。
+      // 这样 `defineConfig({...})`（对象实参）、`createRoot(document.getElementById(...))`（member 实参）
+      // 都解不出标识符 → 不产生签名，不会制造噪音。
+      let hops = 0;
+      while (decl && decl.type === "CallExpression" && hops < 5) {
+        decl = (decl.arguments && decl.arguments[0]) || null;
+        hops++;
+      }
       // export default Page（裸标识符）→ 借 local 声明的签名，避免纯语法重构被误报为 API 变更
       if (decl && decl.type === "Identifier") {
         const target = localDecls.get(decl.name);

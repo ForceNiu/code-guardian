@@ -24,9 +24,26 @@ function containsAny(sym) {
  * `export default function Page(props)`、`export const Comp = (props) => {}`
  * 是 React / Next.js 最常见的两种写法，不认它们会让大量破坏性变更全落 uncertain，
  * 白白消耗 AI Token（实测这类导出占 interview-forge 全部导出的 41%）。
+ *
+ * 🔴 2026-09-16 补第三个判据（A3 修复）：`sym.paramCount !== undefined`。
+ * 起因：**0 参数**的 default / const 导出只携带 paramCount、**不挂 params**
+ * （attachKindInfo 只在 `info.params.length` 非空时才挂），于是只认 params 时
+ * isFunctionLike(old) = false → `0 参 → 加第一个参数` 这类变更进不了参数 heuristic
+ * → 恒定 low/uncertain → **每次变更都白烧一次 AI Token**。
+ * 实测三种写法（具名 / default / const）0参→有参 现已全部升为 high/proven。
+ *
+ * ⚠️⚠️ **只能「或」上去，不能拿它「替换」params 判据**：
+ * 存量快照 / 增量缓存里的 default / variable 符号可能**没有 paramCount 字段**
+ * （该字段正是本轮才发现要补的），替换会让「有 params 无 paramCount」的符号被误判为非函数
+ * —— 实测朴素替换版会误伤 2 条既有断言（isFunctionLike 单测 + 「三种写法同级」断言）。
  */
 function isFunctionLike(sym) {
-  return !!sym && (sym.type === "function" || (Array.isArray(sym.params) && sym.params.length > 0));
+  return (
+    !!sym &&
+    (sym.type === "function" ||
+      (Array.isArray(sym.params) && sym.params.length > 0) ||
+      sym.paramCount !== undefined)
+  );
 }
 
 /**

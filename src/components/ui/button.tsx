@@ -32,11 +32,11 @@ const buttonVariants = cva(
   }
 );
 
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
-}
+// 注：2026-09-16 删掉了继承自 Radix 的 `asChild?: boolean` 死属性 ——
+// 本组件是原生 <button>，从未实现 asChild（且它会被 {...props} 透传到 DOM，触发 React 警告）。
+// 全仓 grep 确认零调用方。
+export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
+  VariantProps<typeof buttonVariants>;
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, ...props }, ref) => {

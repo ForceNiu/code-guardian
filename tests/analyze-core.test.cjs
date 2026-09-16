@@ -804,11 +804,15 @@ test("signature 对 default / variable 带参数时输出函数签名而非类�
   assert.equal(signature(arrow), "function({a:string})");
 });
 
-test("export default memo(X) 等非函数形态不产生签名（降级，不制造噪音）", () => {
+test("export default memo(X) 已解包借内层签名（0 参时 signature 仍回落 'default'）", () => {
+  // ⚠️ 2026-09-16 有意行为变更：本条原先断言「HOC 包裹不产生任何签名」＝降级、不制造噪音。
+  // 但实测这个「降级」把「被包裹组件 props 变化」整类变更**静默丢掉**（变更数 = 0），
+  // 属「少报」方向 → 改为保守解包（详见文件末尾「已知缺陷样本集 · 第 5 条」）。
+  // 原「不制造噪音」的意图改由两条「不借签名」断言承接（对象实参 / member 实参）。
   const code = 'import { memo } from "react";\nfunction Page() {}\nexport default memo(Page);';
   const { exports } = parseFile(code);
-  assert.deepEqual(exports, [{ name: "default", type: "default", line: 3 }]);
-  assert.equal(signature(exports[0]), "default");
+  assert.deepEqual(exports, [{ name: "default", type: "default", line: 3, paramCount: 0 }]);
+  assert.equal(signature(exports[0]), "default"); // 0 参不挂 params，签名仍回落，与第 3 条同族
 });
 
 test("非函数 const 导出行为不变（仍为 variable）", () => {
@@ -1014,3 +1018,147 @@ test("0 参 default 导出改成同名 const 导出：报 removed + added（导�
     [["Home", "added"], ["default", "removed"]],
   );
 });
+
+// ---- 已知缺陷样本集 · 第 4 条：`export { C as default }` 别名导出（2026-09-16 新查出）----
+// 实测根因：ExportNamedDeclaration 的 specifier 分支只记 `{ type:"reexport", localName }`，
+// signature() 对 reexport 输出 `reexport:C` —— base/head 两边**完全相同** → diffSymbols 判「无变化」
+// → 本地函数的签名变化整条**静默漏报**。
+// 与第 1 条「`export default C` 裸标识符借 local 签名」是**同一族**：导出名不是本地名时丢失本地声明签名。
+// 修法：无 `from`（本地绑定）且能解析到携带签名的本地声明时，借其签名（type 仍保持 "reexport"，
+// 否则 pairRenameExports 的「重命名导出」识别会失效）。
+// 🔵 定级侧依赖 A3：0 参时符号只挂 paramCount，需 isFunctionLike 认 paramCount 才能进参数 heuristic。
+
+test("parseFile 为 export { C as default } 借本地声明的签名（修复前只剩 localName）", () => {
+  const { exports } = parseFile(
+    "function C(a: number) { return a; }\nexport { C as default };"
+  );
+  const def = exports.find((e) => e.name === "default");
+  assert.equal(def.type, "reexport"); // 保持 reexport，重命名导出识别才不失效
+  assert.equal(def.localName, "C");
+  assert.equal(def.paramCount, 1);
+  assert.deepEqual(def.params, [{ type: "number", optional: false, name: "a" }]);
+  assert.equal(signature(def), "function(number)");
+});
+
+test("diffSymbols 识别 export { C as default } 指向的本地函数参数变化（修复前静默漏报）", () => {
+  const base = parseFile("function C() { return null; }\nexport { C as default };").exports;
+  const head = parseFile("function C(a: number) { return a; }\nexport { C as default };").exports;
+  const changed = diffSymbols("src/c.ts", base, head);
+  assert.equal(changed.length, 1, "别名 default 导出指向的本地函数签名变化必须被检出");
+  assert.equal(changed[0].symbol, "default");
+  assert.equal(changed[0].changeType, "modified");
+  // 0 参时 params 不挂到符号上（沿用第 3 条的既有形态），签名仍是 local 绑定
+  assert.equal(changed[0].oldSignature, "reexport:C");
+  assert.equal(changed[0].newSignature, "function(number)");
+});
+
+test("export { C as x } 具名别名导出同样借签名（不限 default）", () => {
+  const base = parseFile("function C() { return null; }\nexport { C as x };").exports;
+  const head = parseFile("function C(a: number) { return a; }\nexport { C as x };").exports;
+  const changed = diffSymbols("src/c.ts", base, head);
+  assert.equal(changed.length, 1, "具名别名导出（export { C as x }）同样不得漏报");
+  assert.equal(changed[0].symbol, "x");
+});
+
+test("export { a } from './other' 跨模块转发不借签名（防过度修复）", () => {
+  // 有 from → 符号来自别的模块，本文件没有它的声明，不能凭空造签名
+  const { exports } = parseFile('export { a as y } from "./other";');
+  const y = exports.find((e) => e.name === "y");
+  assert.equal(y.type, "reexport");
+  assert.equal(y.localName, "a");
+  assert.equal(y.paramCount, undefined);
+  assert.equal(signature(y), "reexport:a");
+});
+
+test("export { TAX } 本地非函数绑定不借签名（防过度修复）", () => {
+  const { exports } = parseFile("const TAX = 0.1;\nexport { TAX };");
+  const t = exports.find((e) => e.name === "TAX");
+  assert.equal(t.paramCount, undefined);
+  assert.equal(signature(t), "reexport:TAX");
+});
+
+// ---- 已知缺陷样本集 · 第 5 条：HOC 包裹的 default 导出（2026-09-16 新查出）----
+// 实测根因：ExportDefaultDeclaration 的 declaration 是 CallExpression（memo(X) / forwardRef(X) /
+// connect(map)(X)），isSignatureBearing() 不认这种形态 → 符号不带任何签名 → 被包裹组件的 props
+// 变化**完全检测不到**（实测变更数 = 0）。React 项目里 export default memo(Comp) 是常见写法。
+// 修法：只沿 CallExpression 的**第一个实参**向下解包（限 5 层），取到 Identifier 才借本地声明签名。
+
+test("parseFile 解包 export default memo(X) 借内层组件的签名", () => {
+  const { exports } = parseFile(
+    'import { memo } from "react";\nfunction Page(props: { a: string }) { return null; }\nexport default memo(Page);'
+  );
+  const def = exports.find((e) => e.name === "default");
+  assert.equal(def.type, "default");
+  assert.equal(def.paramCount, 1);
+  assert.deepEqual(def.params, [{ type: "{a:string}", optional: false, name: "props" }]);
+  assert.equal(signature(def), "function({a:string})");
+});
+
+test("diffSymbols 识别 export default memo(X) 内层 props 变化（修复前静默漏报）", () => {
+  const mk = (props) =>
+    `import { memo } from "react";\nfunction Page(props: ${props}) { return null; }\nexport default memo(Page);`;
+  const base = parseFile(mk("{ a: string }")).exports;
+  const head = parseFile(mk("{ a: string; b: number }")).exports;
+  const changed = diffSymbols("src/Page.tsx", base, head);
+  assert.equal(changed.length, 1, "HOC 包裹的内层组件 props 变化必须被检出（修复前变更数为 0）");
+  assert.equal(changed[0].symbol, "default");
+  assert.equal(changed[0].changeType, "modified");
+});
+
+test("diffSymbols 识别 export default forwardRef(X) 内层签名变化", () => {
+  const mk = (n) =>
+    `import { forwardRef } from "react";\nfunction C(${Array.from({ length: n }, (_, i) => `p${i}: any`).join(", ")}) { return null; }\nexport default forwardRef(C);`;
+  const base = parseFile(mk(1)).exports;
+  const head = parseFile(mk(2)).exports;
+  const changed = diffSymbols("src/C.tsx", base, head);
+  assert.equal(changed.length, 1, "forwardRef 包裹的内层签名变化必须被检出");
+});
+
+test("多层柯里化 export default connect(m)(X) 也能解包", () => {
+  const mk = (n) =>
+    `function C(${Array.from({ length: n }, (_, i) => `p${i}: any`).join(", ")}) { return null; }\nfunction m() {}\nexport default connect(m)(C);`;
+  const base = parseFile(mk(1)).exports;
+  const head = parseFile(mk(2)).exports;
+  const changed = diffSymbols("src/C.tsx", base, head);
+  assert.equal(changed.length, 1, "柯里化 HOC（connect(m)(C)）的内层签名变化必须被检出");
+});
+
+test("export default defineConfig({...}) 对象实参不借签名（防过度修复）", () => {
+  const { exports } = parseFile("export default defineConfig({ plugins: [] });");
+  assert.deepEqual(exports, [{ name: "default", type: "default", line: 1 }]);
+  assert.equal(signature(exports[0]), "default");
+});
+
+test("export default createRoot(document.getElementById('root')) 不误借 member 签名（防过度修复）", () => {
+  const { exports } = parseFile(
+    'export default createRoot(document.getElementById("root"));'
+  );
+  assert.deepEqual(exports, [{ name: "default", type: "default", line: 1 }]);
+  assert.equal(signature(exports[0]), "default");
+});
+
+// ---------------------------------------------------------------------------
+// 已知缺陷样本集 · 形态矩阵登记表（2026-09-16 建）
+//
+// 为什么要这张表：本引擎的漏报**全部长在「导出形态」这一个维度上** ——
+// 修好一种写法，同族的另一种写法照样静默（实测：#2 修完，第 4、5 条仍是 0 变更）。
+// 所以样本集必须**按形态穷举**，不能"想到哪个写哪个"。
+//
+// ✅ 已覆盖（每条都有 must-detect 断言，且做过灵敏度验证：先跑到红再修）：
+//    1. 路径引号被 execFileSync 吃掉（shell 串 → 参数数组的副作用）→ 第 1 条（配套见 rules.test.cjs）
+//    2. export default class 的成员变化                        → 第 2 条
+//    3. 0 参 → 有参（default 导出 / const 箭头导出）           → 第 3 条（检测侧 + 定级侧）
+//    4. export { C as default } 别名导出                       → 第 4 条（2026-09-16 新查出）
+//    5. export default memo(X) / forwardRef(X) / 多层柯里化     → 第 5 条（2026-09-16 新查出）
+//    6. 跨写法变更（function 声明 ↔ const 箭头）               → 第 2/3 条附带
+//    每条同时配「不该报」的反向断言（对象实参、成员访问实参、跨模块转发、非函数绑定），
+//    防止"为了修少报把工具改成噪音源"。
+//
+// ❌ 仍未覆盖（已确认存在缺口，**有意不修**，理由见 docs/DEVELOPING.md 第 3 节）：
+//    a. tsconfig extends 继承链里的路径别名 —— 要解析 TS 配置继承，成本 >> 收益
+//    b. barrel 文件自身被删除 —— 影响图反向索引只按 head 侧建集合，属架构性取舍（需把 base 侧已删文件并入可解析集）
+//    c. 动态导出（export * as ns / 运行时拼接 / 条件导出）—— 静态分析天然不可达
+//
+// ⚠️ 往这张表加条目时：**先写断言跑到红，再改代码**，改完回填到 ✅ 区。
+//    任何"顺手放宽判据"的改动都必须同时保留一条反向断言。
+// ---------------------------------------------------------------------------
