@@ -26,7 +26,14 @@ export interface AIJudgement {
   file: string;
   symbol: string;
   severity: "high" | "medium" | "low";
-  confidence: "proven" | "heuristic" | "uncertain";
+  /**
+   * 🔴 2026-09-16 收窄：AI **不得**输出 "proven"。
+   * `proven` 的语义是「变更自身即证据，可直接作为门禁」，这是**确定性规则引擎专属**的结论
+   * （`rules.cjs` 的 RULE_TABLE 产出）。AI 的判断本质是经验性的，让它自称 proven 会让下游
+   * 无法区分「规则引擎的确定性证明」与「AI 的自我评估」（R4 实测：7 条 AI 判定里 5 条拿到 proven）。
+   * 类型与 zod schema 双层收窄 —— 类型层挡住我们自己的代码，schema 层挡住模型的输出。
+   */
+  confidence: "heuristic" | "uncertain";
   suggestion: string;
 }
 
@@ -66,10 +73,11 @@ const SemanticState = Annotation.Root({
 });
 
 // ===== AI 输出的 JSON schema（zod 校验 + 失败回灌） =====
+// ⚠️ confidence 只有两档：proven 属规则引擎，AI 报 proven 会被 schema 拒绝并触发回灌重试。
 const judgmentSchema = z.object({
   index: z.number(),
   severity: z.enum(["high", "medium", "low"]),
-  confidence: z.enum(["proven", "heuristic", "uncertain"]),
+  confidence: z.enum(["heuristic", "uncertain"]),
   reason: z.string(),
 });
 const predictSchema = z.object({ judgments: z.array(judgmentSchema) });
@@ -97,10 +105,11 @@ function retrieve() {
     "- 新增导出/成员、放宽类型/可见性、新增可选项 = 兼容 → low",
     "- 类型具体→具体、方向不明、需结合业务 = medium",
     "",
-    "confidence 含义：",
-    "- proven = 变更自身即证据，可直接作为门禁",
-    "- heuristic = 经验判断，建议人工复核",
+    "confidence 取值（**只有两档，proven 不在其中**）：",
+    "- heuristic = 你的经验判断，建议人工复核",
     "- uncertain = 仍无法确定（尽量少用，仅当真无法判断时）",
+    "⚠️ proven 是「规则引擎的确定性证明」专属标记，由确定性规则产出，AI 不得使用：",
+    "你的判断本质是经验性的，即使很有把握也只能报 heuristic（报 proven 会被判为非法输出）。",
   ].join("\n");
   return { context };
 }
@@ -119,8 +128,8 @@ function makePredict(llm: LLMInvoker) {
       state.context,
       "",
       '严格输出 JSON（不要任何解释文字、不要 markdown 代码块）：',
-      '{"judgments":[{"index":0,"severity":"high","confidence":"proven","reason":"..."}]}',
-      "index 必须与变更编号 [N] 一致；severity 取值 high/medium/low；confidence 取值 proven/heuristic/uncertain。",
+      '{"judgments":[{"index":0,"severity":"high","confidence":"heuristic","reason":"..."}]}',
+      "index 必须与变更编号 [N] 一致；severity 取值 high/medium/low；confidence 只能取 heuristic 或 uncertain（**不得输出 proven**）。",
     ].join("\n");
 
     let lastErr = "";

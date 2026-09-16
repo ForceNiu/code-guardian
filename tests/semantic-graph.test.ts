@@ -69,8 +69,8 @@ test("空 changes 直接返回空数组，不调 LLM", async () => {
 test("正常判定：输出与输入顺序一一对应，字段正确合并", async () => {
   const predict = JSON.stringify({
     judgments: [
-      { index: 0, severity: "high", confidence: "proven", reason: "删除导出" },
-      { index: 1, severity: "low", confidence: "heuristic", reason: "新增可选参数" },
+      { index: 0, severity: "high", confidence: "heuristic", reason: "删除导出" },
+      { index: 1, severity: "low", confidence: "uncertain", reason: "新增可选参数" },
     ],
   });
   const suggest = JSON.stringify({
@@ -84,11 +84,27 @@ test("正常判定：输出与输入顺序一一对应，字段正确合并", as
   const result = await analyzeUncertainChanges(changes, mock);
 
   assert.deepEqual(result, [
-    { file: "src/api.ts", symbol: "removeMe", severity: "high", confidence: "proven", suggestion: "改为废弃标记而非直接删除" },
-    { file: "src/api.ts", symbol: "addOpt", severity: "low", confidence: "heuristic", suggestion: "无需处理" },
+    { file: "src/api.ts", symbol: "removeMe", severity: "high", confidence: "heuristic", suggestion: "改为废弃标记而非直接删除" },
+    { file: "src/api.ts", symbol: "addOpt", severity: "low", confidence: "uncertain", suggestion: "无需处理" },
   ]);
   // 管线应恰好调两次 LLM：一次 predict + 一次 suggest
   assert.equal(mock.calls.length, 2);
+});
+
+test("AI 自称 proven 属非法输出：schema 拒绝 → 回灌重试 → 三次后抛错（R4 Finding 2 护栏）", async () => {
+  // 背景：proven 的语义是「变更自身即证据，可直接作为门禁」，属确定性规则引擎专属结论。
+  // 2026-09-16 前 zod schema 允许 AI 输出 proven，实测 7 条 AI 判定里 5 条拿到 proven
+  // → 下游无法区分「规则引擎的确定性证明」与「AI 的自我评估」。本断言钉住收窄后的不变量。
+  const proven = JSON.stringify({
+    judgments: [{ index: 0, severity: "high", confidence: "proven", reason: "我很确定" }],
+  });
+  const mock = new QueueMockLLM(proven, proven, proven);
+
+  await assert.rejects(
+    () => analyzeUncertainChanges([changes[0]], mock),
+    /影响面预测失败/,
+    "AI 输出 proven 必须被判为非法（否则 proven 语义会被稀释）",
+  );
 });
 
 test("predict 输出非法 JSON 时回灌重试，成功后继续 suggest", async () => {

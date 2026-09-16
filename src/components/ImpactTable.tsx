@@ -16,7 +16,9 @@ const CHANGE_LABEL: Record<string, string> = {
   renamed: "重命名",
 };
 
-// 置信度（M3b 双轨）：proven=规则引擎可直接定级 / heuristic=AI 经验判断 / uncertain=仍不确定
+// 置信度（M3b 双轨）：proven=确定性规则引擎直接定级 / heuristic=AI 经验判断 / uncertain=仍不确定
+// 🔴 2026-09-16：AI 侧 schema 已收窄，proven **只可能**来自规则引擎 ——
+// 所以「确定」这个标签现在是有保证的（此前 AI 也能自称 proven，标签会误导）。
 const CONF_LABEL: Record<string, string> = {
   proven: "确定",
   heuristic: "经验",
