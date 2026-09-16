@@ -126,7 +126,8 @@ test("parseFile 提取导出符号与 import", () => {
     { name: "TAX", type: "variable", line: 4 },
     { name: "Order", type: "class", line: 5 },
     { name: "Config", type: "type", line: 6, fields: [{ name: "a", type: "number", optional: false }] },
-    { name: "default", type: "default", line: 7 },
+    // default 导出若直接是函数，必须携带签名，否则内部破坏性变更会被判为「无变化」
+    { name: "default", type: "default", line: 7, paramCount: 0 },
   ]);
 
   assert.deepEqual(imports, [
@@ -754,4 +755,262 @@ test("resolveImportWithAlias 尊重 baseUrl 子目录", () => {
   const aliases = buildPathAliases('{ "compilerOptions": { "baseUrl": "./config", "paths": { "~/*": ["../src/*"] } } }');
   const allFiles = new Set(["src/lib/a.ts", "src/app/page.tsx"]);
   assert.equal(resolveImportWithAlias("~/lib/a", "src/app/page.tsx", allFiles, aliases), "src/lib/a.ts");
+});
+
+// ---------------------------------------------------------------------------
+// default 导出 / const 箭头函数导出的签名盲区修复（2026-09-15）
+// 修复前：这两类导出的 signature() 恒等于类型名（"default" / "variable"），
+//        参数变化永远比较不出差异 → 破坏性变更静默漏报（真实仓库实测占比 15%~41%）。
+// ---------------------------------------------------------------------------
+
+test("parseFile 为 default 导出的函数提取签名", () => {
+  const code = "export default function Page(props: { a: string }) { return props.a; }";
+  const { exports } = parseFile(code);
+  assert.deepEqual(exports, [
+    {
+      name: "default",
+      type: "default",
+      line: 1,
+      paramCount: 1,
+      params: [{ type: "{a:string}", optional: false, name: "props" }],
+    },
+  ]);
+});
+
+test("parseFile 为 default 导出的箭头函数提取签名", () => {
+  const { exports } = parseFile("export default (props: { a: string }) => props.a;");
+  assert.equal(exports[0].name, "default");
+  assert.equal(exports[0].paramCount, 1);
+  assert.deepEqual(exports[0].params, [{ type: "{a:string}", optional: false, name: "props" }]);
+});
+
+test("parseFile 为 const 箭头函数导出提取签名（React 组件最常见写法）", () => {
+  const { exports } = parseFile("export const Comp = (props: { a: string }) => props.a;");
+  assert.deepEqual(exports, [
+    {
+      name: "Comp",
+      type: "variable",
+      line: 1,
+      paramCount: 1,
+      params: [{ type: "{a:string}", optional: false, name: "props" }],
+    },
+  ]);
+});
+
+test("signature 对 default / variable 带参数时输出函数签名而非类型名", () => {
+  const def = parseFile("export default function Page(props: { a: string }) {}").exports[0];
+  const arrow = parseFile("export const C = (props: { a: string }) => null;").exports[0];
+  assert.equal(signature(def), "function({a:string})");
+  assert.equal(signature(arrow), "function({a:string})");
+});
+
+test("export default memo(X) 等非函数形态不产生签名（降级，不制造噪音）", () => {
+  const code = 'import { memo } from "react";\nfunction Page() {}\nexport default memo(Page);';
+  const { exports } = parseFile(code);
+  assert.deepEqual(exports, [{ name: "default", type: "default", line: 3 }]);
+  assert.equal(signature(exports[0]), "default");
+});
+
+test("非函数 const 导出行为不变（仍为 variable）", () => {
+  const { exports } = parseFile("export const TAX = 0.1;");
+  assert.deepEqual(exports, [{ name: "TAX", type: "variable", line: 1 }]);
+  assert.equal(signature(exports[0]), "variable");
+});
+
+test("diffSymbols 识别 default 导出参数变化（修复前静默漏报）", () => {
+  const base = parseFile("export default function Page(props: { a: string }) { return props.a; }").exports;
+  const head = parseFile(
+    "export default function Page(props: { a: string; b: string }) { return props.a + props.b; }"
+  ).exports;
+  const changed = diffSymbols("src/Page.tsx", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].symbol, "default");
+  assert.equal(changed[0].changeType, "modified");
+  assert.notEqual(changed[0].oldSignature, changed[0].newSignature);
+});
+
+test("diffSymbols 识别 const 箭头函数参数变化（修复前静默漏报）", () => {
+  const base = parseFile("export const Comp = (props: { a: string }) => props.a;").exports;
+  const head = parseFile("export const Comp = (props: { a: string; b: string }) => props.a;").exports;
+  const changed = diffSymbols("src/Comp.tsx", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].changeType, "modified");
+});
+
+// ---------------------------------------------------------------------------
+// 「已知缺陷样本集」第 1 条 —— 回归修复（2026-09-16）
+//
+// 缺陷：签名修复让 `export function f(a,b)` 与 `export const f = (a,b) => …` 在带参数时
+//      算出**完全相同**的签名 → diffSymbols 判「无变化」→ 整条变更静默消失。
+// 实测：sample-repo fixture 变更符号数 9 → 4（丢的 5 个全是带参数的函数转箭头）；
+//      而 0 参数的 HomePage 仅因新旧走不同分支而「碰巧」被检出。
+// 规律：**凡是「少报」方向的缺陷，单测都不会自己报警**——必须显式断言「必须检出」。
+// ---------------------------------------------------------------------------
+test("diffSymbols 识别 export function → export const 箭头函数的种类变化（同参数，回归修复）", () => {
+  const base = parseFile("export function add(a: number, b: number): number { return a + b; }").exports;
+  const head = parseFile("export const add = (a: number, b: number): number => a + b;").exports;
+  const changed = diffSymbols("src/utils/math.ts", base, head);
+  assert.equal(changed.length, 1, "带参数的同签名种类变化必须被检出（修复前静默漏报）");
+  assert.equal(changed[0].symbol, "add");
+  assert.equal(changed[0].changeType, "modified");
+  assert.equal(changed[0].oldSymbol.type, "function");
+  assert.equal(changed[0].newSymbol.type, "variable");
+});
+
+test("diffSymbols 识别 export function → export const 的 0 参数形态（回归修复）", () => {
+  const base = parseFile("export function tick(): void {}").exports;
+  const head = parseFile("export const tick = (): void => {};").exports;
+  const changed = diffSymbols("src/tick.ts", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].changeType, "modified");
+});
+
+test("diffSymbols 对同种类同签名的纯重写仍不误报（防过度修复）", () => {
+  const base = parseFile("export const Comp = (props: { a: string }) => props.a;").exports;
+  const head = parseFile("export const Comp = (props: { a: string }) => { return props.a; };").exports;
+  assert.deepEqual(diffSymbols("src/Comp.tsx", base, head), []);
+});
+
+test("diffSymbols 对 default 导出无参数变化时仍不误报", () => {
+  const base = parseFile("export default function Page() { return 1; }").exports;
+  const head = parseFile("export default function Page() { return 2; }").exports;
+  assert.deepEqual(diffSymbols("src/Page.tsx", base, head), []);
+});
+
+test("export default 裸标识符时借 local 声明的签名", () => {
+  const code = "function Page(props: { a: string }) { return props.a; }\nexport default Page;";
+  const { exports } = parseFile(code);
+  const def = exports.find((e) => e.name === "default");
+  assert.equal(def.paramCount, 1);
+  assert.deepEqual(def.params, [{ type: "{a:string}", optional: false, name: "props" }]);
+});
+
+test("纯语法重构（export default function → 先声明后导出）不误报为 API 变更", () => {
+  const base = parseFile("export default function Home(props: { a: string }) { return props.a; }").exports;
+  const head = parseFile(
+    "function Home(props: { a: string }) { return props.a; }\nexport default Home;"
+  ).exports;
+  assert.deepEqual(diffSymbols("src/app/page.tsx", base, head), []);
+});
+
+test("default 导出真实参数变化仍能被检出（Next 15→16 searchParams 变 Promise 场景）", () => {
+  const base = parseFile("export default async function Home() { return null; }").exports;
+  const head = parseFile(
+    "export default async function Home(props: { searchParams: Promise<{ tag?: string }> }) { return null; }"
+  ).exports;
+  const changed = diffSymbols("src/app/page.tsx", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].changeType, "modified");
+});
+
+// ---- 已知缺陷样本集 · 第 2 条：export default class 的成员变化 ----
+// 背景：signature() 的 class 分支守卫曾被放宽（sym.type === "class" → 只看 classMembers），
+// 使 `export default class` 的成员变化从「检测不到」变为「检得到」。
+// 这是同一类 default 导出签名盲区的修复，但 2026-09-16 提交前审查发现它**零断言覆盖** ——
+// 与三次「少报」事故（git show 引号 / 签名盲区 / B4）是同一个模式：真实检测面扩张，没有断言守着。
+// 本组断言的职责：钉住这个行为。删除 class 守卫的放宽，第 2、3 条必须变红。
+
+test("parseFile 为 export default class 提取成员（default 导出签名盲区）", () => {
+  const { exports } = parseFile("export default class Widget { render() {} }");
+  const def = exports.find((e) => e.name === "default");
+  assert.equal(def.type, "default");
+  assert.deepEqual(def.classMembers, [{ name: "render", visibility: "public", kind: "method" }]);
+  // 关键：签名不再是常量 "default"，而是真实成员签名
+  assert.equal(signature(def), "class{render():public}");
+});
+
+test("diffSymbols 识别 export default class 成员变化（修复前静默漏报）", () => {
+  const base = parseFile("export default class Widget { render() {} }").exports;
+  const head = parseFile("export default class Widget { render() {} destroy() {} }").exports;
+  const changed = diffSymbols("src/widget.ts", base, head);
+  assert.equal(changed.length, 1, "default 导出 class 的成员增加必须被检出（修复前签名恒为 'default'，静默漏报）");
+  assert.equal(changed[0].symbol, "default");
+  assert.equal(changed[0].changeType, "modified");
+  assert.equal(changed[0].oldSignature, "class{render():public}");
+  assert.equal(changed[0].newSignature, "class{destroy():public,render():public}");
+});
+
+test("diffSymbols 识别 export default class 成员可见性变化（public → private）", () => {
+  const base = parseFile("export default class Widget { render() {} }").exports;
+  const head = parseFile("export default class Widget { private render() {} }").exports;
+  const changed = diffSymbols("src/widget.ts", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].oldSignature, "class{render():public}");
+  assert.equal(changed[0].newSignature, "class{render():private}");
+});
+
+test("export default class 内容不变时不误报（防过度修复）", () => {
+  const base = parseFile("export default class Widget { render() {} }").exports;
+  const head = parseFile("export default class Widget { render() {} }").exports;
+  assert.deepEqual(diffSymbols("src/widget.ts", base, head), []);
+});
+
+// ---- 已知缺陷样本集 · 第 3 条：0 参 → 有参（检测侧）----
+// 根因（2026-09-16 实测三种写法的符号形态）：
+//   `export function f()`                  → { type: "function", params: [] }        ← params 存在（空数组）
+//   `export default async function Home()` → { type: "default",  paramCount: 0 }     ← params 不存在
+//   `export const C = () => null`          → { type: "variable", paramCount: 0 }     ← params 不存在
+// 差别来自 attachKindInfo 只在 `info.params.length` 非空时才挂 params；具名函数则整包 Object.assign。
+// 于是 0 参时 default / variable 两种写法的 signature() 会【回落到类型名】，定级侧随之失去精度。
+// 🔵 重要澄清：这【不是漏报】——三种写法在 diffSymbols 层都【检出了】变更（见下方断言）。
+//    问题只在【定级精度】：走不进参数 heuristic → 恒定 low/uncertain → 白烧 AI Token（见 A3）。
+//    「静默丢弃」（B4 / 签名盲区）与「定级不准」（本条）是两种性质，不要混为一谈。
+// 📌 定级侧同族断言在 tests/rules.test.cjs 末尾。
+//    ⚠️ 分层要分清：A3 的修法（`isFunctionLike` 改判 `paramCount !== undefined`）**只动 rules 层定级**，
+//    **不改 signature()** —— 所以修 A3 后**本文件的断言应全部保持绿色**（签名仍回落为类型名），
+//    只有 rules.test.cjs 那两条会变红。若哪天连 signature() 一起改（让 0 参也输出 `function()`），
+//    则本文件这两条也必须【有意】更新 —— 这正是分层断言的价值：谁被改动，一眼可见。
+
+test("0 参 → 加第一个参数：具名函数（对照基准，参数变化永远优于类型名回落）", () => {
+  const base = parseFile("export function f() { return 1; }").exports;
+  const head = parseFile("export function f(a: number) { return 1; }").exports;
+  const changed = diffSymbols("src/f.ts", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].changeType, "modified");
+  assert.equal(changed[0].oldSignature, "function()");
+  assert.equal(changed[0].newSignature, "function(number)");
+});
+
+test("0 参 → 加第一个参数：export default 导出必须检出（签名回落为 'default'，但非漏报）", () => {
+  const base = parseFile("export default async function Home() { return null; }").exports;
+  const head = parseFile(
+    "export default async function Home(props: { a: string }) { return null; }"
+  ).exports;
+  const changed = diffSymbols("src/app/page.tsx", base, head);
+  assert.equal(changed.length, 1, "0 参 → 有参必须被检出（整类 default 导出漏检曾是签名盲区事故）");
+  assert.equal(changed[0].changeType, "modified");
+  // 📌 缺口标记（检测层现状）：0 参时 params 不挂到符号上，故签名回落为类型名。
+  //    A3 只改 rules 层，**不会**改这里；本断言在 A3 修复后应仍然成立。
+  assert.equal(changed[0].oldSignature, "default");
+  assert.equal(changed[0].newSignature, "async function({a:string})");
+});
+
+test("0 参 → 加第一个参数：const 箭头导出必须检出（签名回落为 'variable'，但非漏报）", () => {
+  const base = parseFile("export const C = () => null;").exports;
+  const head = parseFile("export const C = (props: { x: string }) => null;").exports;
+  const changed = diffSymbols("src/C.tsx", base, head);
+  assert.equal(changed.length, 1);
+  assert.equal(changed[0].changeType, "modified");
+  // 📌 缺口标记（检测层现状）—— 同 default 那条：A3 修复后本断言应仍然成立（signature() 不受 A3 影响）
+  assert.equal(changed[0].oldSignature, "variable");
+  assert.equal(changed[0].newSignature, "function({x:string})");
+});
+
+test("0 参导出纯重写（参数确实没变）不误报（防过度修复）", () => {
+  const base = parseFile("export const C = () => null;").exports;
+  const head = parseFile("export const C = () => undefined;").exports;
+  assert.deepEqual(diffSymbols("src/C.tsx", base, head), []);
+});
+
+test("0 参 default 导出改成同名 const 导出：报 removed + added（导出名已不是 'default'，属保守方向）", () => {
+  const base = parseFile("export default function Home() { return null; }").exports;
+  const head = parseFile("export const Home = (a: number) => null;").exports;
+  const changed = diffSymbols("src/x.ts", base, head);
+  // `export default function Home()` 的导出名是 'default'（local 名 Home 并未具名导出），
+  // head 变成具名导出 'Home' → 是「default 消失 + Home 新增」，语义正确。
+  // 报得比实际"重命名"更保守（removed/added 而非 renamed）属于安全方向——不会漏报。
+  assert.deepEqual(
+    changed.map((c) => [c.symbol, c.changeType]).sort(),
+    [["Home", "added"], ["default", "removed"]],
+  );
 });
