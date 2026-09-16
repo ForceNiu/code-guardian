@@ -112,13 +112,16 @@ curl -X POST http://localhost:3000/api/webhook \
 ## 目录结构
 
 ```
-prisma/            schema（5 张表）+ seed
+prisma/            schema（5 张表）+ 迁移 + seed
 src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
-src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 类型
+src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型
 src/worker/        Worker 线程（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）
 src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
+tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / 安全门禁 / webhook 适配）
+scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
 fixtures/          演示用 git 仓库
-docs/              产品文档 · 架构文档
+docs/              产品文档 · 架构文档 · 前端设计说明 · reports/（历史审查与验证结论）· demo-ai-uncertain/（AI 触发演示快照）
+.github/           CI（lint → typecheck → test → build 四道门禁，单 job）
 ```
 
 详见 [产品文档](docs/product.md) 与 [架构文档](docs/architecture.md)。
@@ -130,13 +133,15 @@ docs/              产品文档 · 架构文档
 | 命令 | 作用 |
 | :--- | :--- |
 | `npm run dev` | 启动开发服务器（调度器随 `instrumentation.ts` 自动拉起，自动消费 pending 任务） |
-| `npm run build` | 生产构建 |
+| `npm run build` | 生产构建（CI 第四道门禁） |
+| `npm run start` | 启动生产服务器（需先 `npm run build`） |
 | `npm run lint` | ESLint（CI 第一道门禁） |
 | `npm run typecheck` | `tsc --noEmit` 类型检查（CI 第二道门禁） |
 | `npm test` | Node 内置 `node:test`，纳 `tests/*.test.cjs` + `tests/*.test.ts`（CI 第三道门禁） |
 | `npm run scan <仓库路径> [baseRef] [headRef]` | 跳过 Web/DB，**直接对本地仓库跑一遍完整分析**（引擎改动后唯一靠谱的验证手段） |
 | `npm run prisma:generate` | 生成 Prisma Client（项目无 postinstall，CI 与本地都需手动跑一次） |
 | `npm run prisma:migrate` | 迁移（开发） |
+| `npm run prisma:deploy` | 迁移（生产，只应用已有迁移、不生成新迁移） |
 | `npm run prisma:studio` | Prisma Studio 可视化查库 |
 | `npm run db:up` / `db:down` | 本地 Docker Postgres 起停（`.env` 要指到本地连接串） |
 | `npm run fixture` | 生成演示仓库 |
@@ -166,5 +171,12 @@ docs/              产品文档 · 架构文档
 | 能力全貌 / 环境变量 / 脚本 | 本文件 README.md |
 | 架构设计与规则口径 | [docs/architecture.md](docs/architecture.md) |
 | 产品定位与使用场景 | [docs/product.md](docs/product.md) |
-| **接手干活先读**（现状/待办/红线） | [docs/HANDOVER.md](docs/HANDOVER.md) |
+| 前端视觉设计原则 | [docs/frontend-redesign.md](docs/frontend-redesign.md) |
 | 历史审查结论 | [docs/reports/CODE_REVIEW_REPORT.md](docs/reports/CODE_REVIEW_REPORT.md) |
+| 端到端验证记录 | [docs/reports/E2E-VERIFICATION-2026-09-16.md](docs/reports/E2E-VERIFICATION-2026-09-16.md) |
+
+---
+
+## 开源协议
+
+MIT License，详见 [LICENSE](LICENSE)。
