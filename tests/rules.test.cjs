@@ -10,6 +10,7 @@ const {
   classifyEnumChange,
   classifyClassChange,
   containsAny,
+  isFunctionLike,
 } = require("../src/worker/rules.cjs");
 
 // 辅助构造器
@@ -610,3 +611,133 @@ test("重命名导出即使零引用也保持 high/proven（语义即破坏性�
   const cs = { changeType: "renamed", symbol: "a", newName: "b" };
   assert.deepEqual(runRules(cs, 99), { severity: "high", confidence: "proven" });
 });
+
+// ---------------------------------------------------------------------------
+// default 导出 / const 箭头函数导出走函数签名规则（2026-09-15）
+// 修复前：runRules 只认 type === "function"，这两种 React 最常见写法全部落
+//        low/uncertain → 每条都要喂给 LangGraph 语义引擎烧 Token。
+// ---------------------------------------------------------------------------
+
+test("isFunctionLike：default / const 箭头导出只要带参数就算函数型", () => {
+  assert.equal(isFunctionLike({ type: "function", params: [] }), true);
+  assert.equal(isFunctionLike({ type: "default", params: [{ type: "{a:string}", name: "props" }] }), true);
+  assert.equal(isFunctionLike({ type: "variable", params: [{ type: "string", name: "a" }] }), true);
+  // 无签名的降级形态：export default memo(X) / export const TAX = 0.1
+  assert.equal(isFunctionLike({ type: "default" }), false);
+  assert.equal(isFunctionLike({ type: "variable" }), false);
+  assert.equal(isFunctionLike({ type: "type", fields: [{ name: "a", type: "number" }] }), false);
+  assert.equal(isFunctionLike(null), false);
+});
+
+test("default / const 箭头导出的参数变化与具名函数同级（不再落 uncertain）", () => {
+  const p1 = [{ type: "{a:string}", optional: false, name: "props" }];
+  const p2 = [{ type: "{a:string,b:string}", optional: false, name: "props" }];
+  const mk = (type) => ({
+    changeType: "modified",
+    oldSymbol: { name: "X", type, line: 1, params: p1 },
+    newSymbol: { name: "X", type, line: 1, params: p2 },
+  });
+  const asFunction = runRules(mk("function"), 1);
+  // 三种写法必须给出完全一致的判定，否则 React 项目里同样的改动会有两套标准
+  assert.deepEqual(runRules(mk("default"), 1), asFunction);
+  assert.deepEqual(runRules(mk("variable"), 1), asFunction);
+  // 且不能再是 uncertain（要能靠规则直接定级，不走 AI）
+  assert.notEqual(asFunction.confidence, "uncertain");
+});
+
+// ---------------------------------------------------------------------------
+// 「已知缺陷样本集」第 1 条（配套断言，2026-09-16）
+// 种类变化（function → const 箭头，参数完全不变）应当落 uncertain 交 AI 判断，
+// 既不能静默丢弃（diffSymbols 侧断言，见 analyze-core.test.cjs），
+// 也不能因为它「看着像纯重构」就直接放过。
+// 依据：function 声明有提升（hoisting），const 箭头函数没有（TDZ），
+//      this 绑定与可构造性亦不同 —— 属真实语义变更，规则引擎证不出 break，故交 AI。
+// ---------------------------------------------------------------------------
+test("种类变化（function → const 箭头，参数不变）落 uncertain 交 AI，不误判也不静默", () => {
+  const params = [
+    { type: "number", optional: false, name: "a" },
+    { type: "number", optional: false, name: "b" },
+  ];
+  const r = runRules(
+    {
+      changeType: "modified",
+      oldSymbol: { name: "add", type: "function", line: 1, params, returnType: "number" },
+      newSymbol: { name: "add", type: "variable", line: 1, params, returnType: "number" },
+    },
+    1,
+  );
+  assert.equal(r.confidence, "uncertain");
+  assert.equal(r.severity, "low");
+});
+
+// ---------------------------------------------------------------------------
+// 已知缺陷样本集 · 第 3 条（定级侧）：0 参 → 有参
+// 检测侧同族断言见 tests/analyze-core.test.cjs 末尾（那一组证明「不是漏报」）。
+// 本条回答的是另一个问题：**检出来之后定级准不准**。
+//
+// ⚠️ 第 2、3 条当前断言的是【现有行为】，它们标记的是 **A3 缺口**：
+//    old 侧 0 参 → params 未挂到符号上 → isFunctionLike(old) = false
+//    → 进不了参数 heuristic → 恒定 low/uncertain → 每次变更都白烧一次 AI Token。
+//    修 A3（isFunctionLike 改判 paramCount !== undefined）后，这两条**必须变红**，
+//    并被【有意】改成 proven 系 —— 这就是 B3 存在的意义：把「改动的影响面」变成可见的。
+//    没有这组断言，你分不清「A3 修好了 0 参这一族」和「顺手把别的族也改了」。
+// 第 1 条是**对照基准**（控制组）：具名函数同样 0 参，却能正确走参数规则 —— 不得回归。
+// ---------------------------------------------------------------------------
+
+test("0 参 → 有参：具名函数走参数规则，high/proven（对照基准，不得回归）", () => {
+  const r = runRules(
+    {
+      changeType: "modified",
+      oldSymbol: { name: "f", type: "function", line: 1, paramCount: 0, params: [] },
+      newSymbol: {
+        name: "f",
+        type: "function",
+        line: 1,
+        paramCount: 1,
+        params: [{ type: "number", optional: false, name: "a" }],
+      },
+    },
+    0,
+  );
+  assert.equal(r.severity, "high");
+  assert.equal(r.confidence, "proven");
+});
+
+test("0 参 → 有参：export default 导出落 low/uncertain（A3 缺口，修好后应改 proven 系）", () => {
+  const r = runRules(
+    {
+      changeType: "modified",
+      oldSymbol: { name: "default", type: "default", line: 1, paramCount: 0 },
+      newSymbol: {
+        name: "default",
+        type: "default",
+        line: 1,
+        paramCount: 1,
+        params: [{ type: "{a:string}", optional: false, name: "props" }],
+      },
+    },
+    0,
+  );
+  assert.equal(r.confidence, "uncertain");
+  assert.equal(r.severity, "low");
+});
+
+test("0 参 → 有参：const 箭头导出落 low/uncertain（A3 缺口，修好后应改 proven 系）", () => {
+  const r = runRules(
+    {
+      changeType: "modified",
+      oldSymbol: { name: "C", type: "variable", line: 1, paramCount: 0 },
+      newSymbol: {
+        name: "C",
+        type: "variable",
+        line: 1,
+        paramCount: 1,
+        params: [{ type: "{x:string}", optional: false, name: "props" }],
+      },
+    },
+    0,
+  );
+  assert.equal(r.confidence, "uncertain");
+  assert.equal(r.severity, "low");
+});
+

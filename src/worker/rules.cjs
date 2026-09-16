@@ -19,6 +19,17 @@ function containsAny(sym) {
 }
 
 /**
+ * 是否可当作函数来比较签名。
+ * 除 type=function 外，default 导出与 const 变量导出只要携带参数也算——
+ * `export default function Page(props)`、`export const Comp = (props) => {}`
+ * 是 React / Next.js 最常见的两种写法，不认它们会让大量破坏性变更全落 uncertain，
+ * 白白消耗 AI Token（实测这类导出占 interview-forge 全部导出的 41%）。
+ */
+function isFunctionLike(sym) {
+  return !!sym && (sym.type === "function" || (Array.isArray(sym.params) && sym.params.length > 0));
+}
+
+/**
  * 分类函数签名变更：对比 old/new 的 async / returnType / params，
  * 返回一个变更类型标签，供查表定级。
  *
@@ -97,7 +108,11 @@ function classifyFunctionChange(oldSym, newSym) {
     }
   }
 
-  return "unknown"; // 理论不会到（diffSymbols 仅在签名变时产出 modified）
+  // 签名 / 参数 / 返回类型全相同，但仍被判为 modified 的情形：
+  // 导出「种类」变了（如 `export function f(a)` → `export const f = (a) => …`）。
+  // 规则引擎证不出 break（提升语义、TDZ、this 绑定差异都属运行时行为），故落
+  // low/uncertain 交 AI 判断。2026-09-16 回归修复后这条路径会真实走到。
+  return "unknown";
 }
 
 /**
@@ -244,10 +259,11 @@ function runRules(cs, impactedCount) {
       ? { severity: "medium", confidence: "proven" }
       : { severity: "low", confidence: "proven" };
   } else {
-    // modified：函数 → 函数签名规则；type/interface → 字段级规则（M3a-2）；其余归 uncertain
+    // modified：函数型（含 default / const 箭头，只要带参数）→ 函数签名规则；
+    //          type/interface → 字段级规则（M3a-2）；其余归 uncertain
     const oldSym = cs.oldSymbol || {};
     const newSym = cs.newSymbol || {};
-    if (oldSym.type === "function" && newSym.type === "function") {
+    if (isFunctionLike(oldSym) && isFunctionLike(newSym)) {
       const label = classifyFunctionChange(oldSym, newSym);
       result = RULE_TABLE[label] || RULE_TABLE.unknown;
     } else if (oldSym.type === "type" && newSym.type === "type") {
@@ -286,4 +302,4 @@ function runRules(cs, impactedCount) {
   return result;
 }
 
-module.exports = { runRules, classifyFunctionChange, classifyTypeFieldChange, classifyEnumChange, classifyClassChange, containsAny };
+module.exports = { runRules, classifyFunctionChange, classifyTypeFieldChange, classifyEnumChange, classifyClassChange, containsAny, isFunctionLike };

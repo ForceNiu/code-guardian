@@ -210,7 +210,14 @@ function extractClassMembers(decl) {
 }
 
 function nodeKind(node) {
-  if (node.type === "FunctionDeclaration" || node.type === "TSDeclareFunction") {
+  // 箭头函数 / 函数表达式也走同一条路径：export const X = (props) => {} 这类
+  // React 常见写法必须能提取签名，否则参数变化完全检测不到。
+  if (
+    node.type === "FunctionDeclaration" ||
+    node.type === "TSDeclareFunction" ||
+    node.type === "ArrowFunctionExpression" ||
+    node.type === "FunctionExpression"
+  ) {
     return {
       type: "function",
       paramCount: node.params ? node.params.length : 0,
@@ -245,6 +252,32 @@ function nodeKind(node) {
   return { type: "variable" };
 }
 
+/**
+ * 把 nodeKind() 提取到的函数/类细节挂到符号上（只挂非空字段，保持签名稳定）。
+ * 用于 default 导出与 const 变量导出——它们此前不携带任何签名信息。
+ */
+function attachKindInfo(sym, info) {
+  if (!info) return sym;
+  if (info.paramCount !== undefined) sym.paramCount = info.paramCount;
+  if (info.params && info.params.length) sym.params = info.params;
+  if (info.returnType) sym.returnType = info.returnType;
+  if (info.async) sym.async = info.async;
+  if (info.classMembers && info.classMembers.length) sym.classMembers = info.classMembers;
+  return sym;
+}
+
+/** 判断节点是否是「可直接提取签名的函数/类形态」 */
+function isSignatureBearing(node) {
+  return (
+    !!node &&
+    (node.type === "FunctionDeclaration" ||
+      node.type === "TSDeclareFunction" ||
+      node.type === "ArrowFunctionExpression" ||
+      node.type === "FunctionExpression" ||
+      node.type === "ClassDeclaration")
+  );
+}
+
 /** 解析单文件，提取导出符号 + import 声明（解析失败安全降级为空） */
 function parseFile(code) {
   const exports = [];
@@ -261,6 +294,20 @@ function parseFile(code) {
     return { exports, imports, reexports };
   }
 
+  // 预扫描顶层声明：`export default Page` 这种「先声明、后导出」的写法需要借 local 声明的签名，
+  // 否则会和 `export default function Page(){}` 判成两个不同签名，把纯语法重构误报成 API 变更。
+  const localDecls = new Map();
+  for (const node of ast.program.body || []) {
+    if ((node.type === "FunctionDeclaration" || node.type === "ClassDeclaration") && node.id) {
+      localDecls.set(node.id.name, node);
+    } else if (node.type === "VariableDeclaration") {
+      for (const d of node.declarations || []) {
+        const n = extractName(d.id);
+        if (n && d.init) localDecls.set(n, d.init);
+      }
+    }
+  }
+
   traverse(ast, {
     ExportNamedDeclaration(p) {
       const node = p.node;
@@ -270,7 +317,17 @@ function parseFile(code) {
         if (decl.type === "VariableDeclaration") {
           for (const d of decl.declarations) {
             const name = extractName(d.id);
-            if (name) exports.push({ name, type: "variable", line });
+            if (!name) continue;
+            const sym = { name, type: "variable", line };
+            // export const Comp = (props) => {} —— React 里最常见的组件写法。
+            // 不提取签名的话，箭头函数组件的参数变化（如新增必填 prop）完全检测不到。
+            if (
+              d.init &&
+              (d.init.type === "ArrowFunctionExpression" || d.init.type === "FunctionExpression")
+            ) {
+              attachKindInfo(sym, nodeKind(d.init));
+            }
+            exports.push(sym);
           }
         } else {
           const info = nodeKind(decl);
@@ -304,7 +361,19 @@ function parseFile(code) {
     },
     ExportDefaultDeclaration(p) {
       const line = p.node.loc ? p.node.loc.start.line : 0;
-      exports.push({ name: "default", type: "default", line });
+      const sym = { name: "default", type: "default", line };
+      // default 导出此前签名恒为 "default"：内部任何破坏性变更都会被判为「无变化」而静默漏报。
+      // Next.js 的 page / layout / route 几乎全是 `export default function`，必须提取签名。
+      let decl = p.node.declaration;
+      // export default Page（裸标识符）→ 借 local 声明的签名，避免纯语法重构被误报为 API 变更
+      if (decl && decl.type === "Identifier") {
+        const target = localDecls.get(decl.name);
+        if (target) decl = target;
+      }
+      if (isSignatureBearing(decl)) {
+        attachKindInfo(sym, nodeKind(decl));
+      }
+      exports.push(sym);
     },
     ExportAllDeclaration(p) {
       // export * from "./x"：记录 barrel 转发边（无具名 specifier），供反向索引穿透
@@ -434,18 +503,24 @@ function resolveImportWithAlias(source, importerRel, allFiles, aliases) {
   return null;
 }
 
-function signature(sym) {
-  if (sym.type === "function") {
-    if (Array.isArray(sym.params)) {
-      const params = sym.params
-        .map((p) => `${p.type || "?"}${p.optional ? "?" : ""}${p.rest ? "..." : ""}`)
-        .join(",");
-      const ret = sym.returnType ? `:${sym.returnType}` : "";
-      const prefix = sym.async ? "async " : "";
-      return `${prefix}function(${params})${ret}`;
-    }
-    return `function(${sym.paramCount ?? "?"})`; // 旧数据（仅 paramCount）回退
+/** 函数签名文本：function / default / variable 三种类型只要带 params 就共用同一套表达 */
+function functionSignatureText(sym) {
+  if (Array.isArray(sym.params)) {
+    const params = sym.params
+      .map((p) => `${p.type || "?"}${p.optional ? "?" : ""}${p.rest ? "..." : ""}`)
+      .join(",");
+    const ret = sym.returnType ? `:${sym.returnType}` : "";
+    const prefix = sym.async ? "async " : "";
+    return `${prefix}function(${params})${ret}`;
   }
+  return `function(${sym.paramCount ?? "?"})`; // 旧数据（仅 paramCount）回退
+}
+
+function signature(sym) {
+  if (sym.type === "function") return functionSignatureText(sym);
+  // default 导出 / const 箭头函数导出：此前签名恒等于类型名，参数变化被完全忽略 → 静默漏报。
+  // 现在只要携带 params 就参与比较（无参数时仍回落到类型名，避免制造噪音）。
+  if (Array.isArray(sym.params) && sym.params.length) return functionSignatureText(sym);
   // type/interface 字段签名：type{字段:类型?,...}，字段变化才触发 modified（M3a-2）
   if (sym.type === "type" && Array.isArray(sym.fields) && sym.fields.length) {
     const fields = sym.fields
@@ -464,7 +539,7 @@ function signature(sym) {
     return `enum{${sym.enumMembers.join(",")}}`;
   }
   // class 签名：class{成员:可见性,...}，方法加 ()，成员变化才触发 modified（M3a-2）
-  if (sym.type === "class" && Array.isArray(sym.classMembers) && sym.classMembers.length) {
+  if (Array.isArray(sym.classMembers) && sym.classMembers.length) { // 含 default 导出的 class
     const members = sym.classMembers
       .map((m) => `${m.name}${m.kind === "method" ? "()" : ""}:${m.visibility}`)
       .join(",");
@@ -486,7 +561,18 @@ function diffSymbols(file, oldExports, newExports) {
       changed.push({ file, symbol: name, changeType: "added", newSignature: signature(n), newSymbol: n, line: n.line });
     } else if (o && !n) {
       changed.push({ file, symbol: name, changeType: "removed", oldSignature: signature(o), oldSymbol: o, line: o.line });
-    } else if (o && n && signature(o) !== signature(n)) {
+    } else if (
+      o &&
+      n &&
+      // 签名不同 → 常规 modified。
+      // 🔴 但**导出「种类」变化也必须产出 modified**：`export function f(a,b)` 与
+      // `export const f = (a,b) => …` 在带参数时 signature() 算出**完全相同的文本**，
+      // 若只比签名，这类变更会整条静默消失（2026-09-16 实测：sample-repo fixture
+      // 变更符号数 9 → 4，丢的 5 个全是带参数的函数转箭头）。
+      // 这类变更语义上真实存在（function 声明有提升、const 箭头无 → TDZ；this 绑定与
+      // 可构造性亦不同），且规则引擎会落 unknown → low/uncertain 交 AI 判断，不制造假阳性。
+      (signature(o) !== signature(n) || o.type !== n.type)
+    ) {
       changed.push({
         file,
         symbol: name,

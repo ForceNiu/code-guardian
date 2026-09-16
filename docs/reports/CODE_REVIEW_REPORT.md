@@ -113,7 +113,7 @@
 ### 🟢 P6 — 收尾打磨
 - `Button` 声明 `asChild` 但未实现（死属性，调用方若依赖会出错）→ 删掉或接 `Slot`。
 - 首页 Hero「最近任务数」用 `tasks.length`（受 `size=50` 限制）→ 改用 `total`。
-- `next build` 会告警：`package-lock.json` 在父目录 `/Users/nzmin/WorkBuddy/AI`、落在 git 仓库之外 → 建议在 `next.config.ts` 显式设 `turbopack.root`，否则构建根推断可能不稳。
+- `next build` 会告警：`package-lock.json` 在父目录 `/Users/<user>/WorkBuddy/AI`、落在 git 仓库之外 → 建议在 `next.config.ts` 显式设 `turbopack.root`，否则构建根推断可能不稳。
 - 错误信息含 stack 前 500 字落库 + SSE（内部可接受；若在乎可只存服务端日志）。
 - Monaco 走 jsdelivr CDN：纯内网/离线部署时 Diff 视图不可用（运营依赖）。
 - 手动触发 POST 无鉴权：仅当多用户互不信任时才需加（API-Key 最简）。
@@ -141,3 +141,75 @@
 6. **P6 收尾打磨**（未动）：Button asChild、Hero 统计、`turbopack.root`、CDN 依赖评估。
 
 **P2–P5 已全部闭环**，四道门禁（lint / typecheck / test / build）实测全绿；P1 纠偏后无阻塞项。项目可放心作为内部可用的代码副作用检测平台。剩余可选项为 P1 的 `scheduler` 单测与 P6 打磨。
+
+---
+
+## 7. 真实仓库验证发现的「签名盲区」（2026-09-15，已修）
+
+P1–P5 闭环、125 个单测全绿之后，拿真实仓库（interview-forge / failwatch）与自建最小 fixture 复扫，
+查出两个**单测完全拦不住的静默漏报**。这是本轮最重要的一次发现。
+
+### 7.1 根因
+
+`signature()` 对 `type === "default"` 和 `type === "variable"` 直接 `return sym.type`——
+签名恒为常量字符串，于是 `diffSymbols` 里 `signature(o) !== signature(n)` 永远为假，
+**任何破坏性变更都被判成「无变化」，输出看起来完全正常**。
+
+两类受影响：
+
+| 写法 | 说明 |
+|---|---|
+| `export default function Page(props) {}` | 此前记在「已知盲区」，但未量化 |
+| `export const Comp = (props) => {}` | **此前未发现**，React / Next.js 里比 default 更常见 |
+
+### 7.2 量化（实测）
+
+| 仓库 | 导出总数 | 无签名 | 盲区占比 |
+|---|---|---|---|
+| interview-forge | 91 | 37 | **41%** |
+| code-guardian（自检） | 84 | 13 | **15%** |
+
+可修复覆盖度：default 导出中 **85%（interview-forge）～100%（code-guardian）** 是
+`export default function`，可直接提取签名；剩余 `export default memo(X)` 一类仍降级（不误报）。
+
+### 7.3 决定性验证（最小 fixture，同一处破坏性改动）
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| default 导出新增必填 prop | 变更符号 **0**，输出「完全安全」 | `modified` / medium / heuristic / 引用 1 |
+| const 箭头函数新增必填 prop | 变更符号 **0** | `modified` / medium / heuristic / 引用 1 |
+| 具名 `export function`（对照组） | `modified` / medium / heuristic | 同左（行为不变） |
+
+### 7.4 修复
+
+**`src/worker/analyze-core.cjs`**
+- `nodeKind()` 支持 `ArrowFunctionExpression` / `FunctionExpression`；
+- 新增 `attachKindInfo()` / `isSignatureBearing()`；
+- `ExportDefaultDeclaration` 挂签名；**裸标识符**（`export default Page`）借顶层 local 声明的签名——
+  否则 `export default function X` → `function X; export default X` 这种纯语法重构会被误报成 API 变更；
+- `ExportNamedDeclaration` 的 variable 分支：init 为箭头/函数表达式时挂签名；
+- `signature()`：带 `params` 的符号一律走函数签名（不再返回类型名），`classMembers` 同理放宽。
+
+**`src/worker/rules.cjs`**
+- 新增 `isFunctionLike()`；`runRules` 的 modified 分支改为函数型判定，
+  让 default / const 箭头与具名函数**同级（heuristic，0 Token）**，而不是落 `uncertain` 去烧 AI。
+
+### 7.5 真实仓库复扫（interview-forge `main~20..main`）
+
+- 变更符号 4 → 5：新增检出 `src/app/page.tsx#default`
+  （`export default async function Home()` → 带 `searchParams`，Next 16 语义，**真阳性**）；
+- 同批**消除 4 条纯语法重构误报**；
+- 自检（扫 code-guardian 自身 `main~5..main`）正确报出
+  `src/lib/types.ts#SymbolTableEntry` 变更影响 `src/lib/persist.ts`（high / proven / 引用 1）。
+
+### 7.6 配套工具
+
+```bash
+npm run scan <仓库绝对路径> [baseRef] [headRef]
+# 例：npm run scan ../interview-forge main~20 main
+```
+
+`scripts/scan-repo.cjs` —— 绕过 DB/HTTP 直接驱动分析 worker。
+**任何引擎改动都应重跑真实仓库核对**：这两次事故（git show 引号、签名盲区）都是 100+ 单测全绿时发生的。
+
+测试 125 → **139**（新增 14 条覆盖两个盲区与误报抑制）。
