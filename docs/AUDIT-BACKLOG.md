@@ -56,6 +56,23 @@
 | **P2⑥** | `.cache/` 62M | **已删除**（会自动重建） |
 | — | 测试基础设施 | `package.json` 的 `test` 脚本加 `--experimental-test-module-mocks`（CI 走 `npm test`，自动生效，无需改 workflow） |
 
+### 2026-09-16 第四批（分支 `test/c-class-remaining` · PR #18 · squash merge · **main = `2e9b9ee2`**）
+
+| # | 条目 | 关键点 |
+|---|---|---|
+| **C2** | `src/lib/persist.ts` | 10 条：事务内调用顺序、空表不进事务、3 条防御性解析（快照字段缺失/类型错乱时不炸） |
+| **C3** | `src/lib/enqueue.ts` | 10 条：`deriveName` 边界、SSE publish、duplicate 不广播、缺省字段按 `??` 口径落库 |
+| **C6** | `src/lib/ai/deepseek.ts` | 15 条：mock `node:https`/`node:http` 两条出网通路（代理 CONNECT / 直连）+ 请求形状 + 消息转换 + 限流退避 |
+| **C5** | `src/worker/analyze.worker.cjs` | 8 条：**真实 git 仓库 + 真 Worker 线程**的集成测试（这层不能 mock，见 C5 验收证据） |
+| **C1** | `src/lib/scheduler.ts` | 13 条（7 个 fake）：启停 / 卡死回收 / 原子认领 / 并发上限 / **两道 `ctrl.cancelled` 守卫**（各自可独立证伪） |
+| — | 收口上一批的事故 | 删掉 `deepseek` / `scheduler` 两个无效测试；还原被砍坏的 `scheduler.ts` / `persist.ts`（与 main 一致） |
+
+- 测试规模 **181 → 237 pass**；四道门禁（lint / typecheck / test / build）全绿；**`src/` 零改动**（只加测试 + 台账）。
+- PR **#18**（https://github.com/ForceNiu/code-guardian/pull/18）2026-09-16 23:53 UTC squash merge，
+  合并后 main = `2e9b9ee2`；`merge_commit_sha` 已用 `verification.payload + gpgsig` **逐字节复现并同步到本地**。
+- ⚠️ 分支 `test/c-class-remaining`（head `3a75225`）在 squash 后**已「死」**（按约定保留未删）；
+  后续改动一律从 main 开新分支。
+
 ---
 
 ## 二、🔜 待做（按执行顺序）
@@ -67,7 +84,10 @@
   （⚠️ 不用 `--is-ancestor` —— squash 是新提交，必然不成立）。
 - ✅ 本节原写「只差合并批准」，**2026-09-16 23:0x 同步为已完成**。
 
-### 1. C 类测试缺口 · 7 个模块（**用户 2026-09-16 定为「都做」**）
+### 1. ✅ C 类测试缺口 · 7 个模块（**用户 2026-09-16 定为「都做」**）
+
+> ✅ **2026-09-16 全部完成并已入库**（PR #18，main = `2e9b9ee2`）。本条保留在此处是为了留下证据与范式，
+> **不要再当成待做项**——需要新测试时另开条目。
 
 | # | 模块 | 行数 | 测什么 | 难度 |
 |---|---|---|---|---|
@@ -225,10 +245,14 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
   （`MonacoEnvironment.getWorker` + worker 入口），且会把 monaco 打进产物（**体积成本**）。
   → 建议**单独一批**处理，先做可行性 spike，别和 C 类混在一起。
 
-### 3. 全链路重跑（**红线要求，不可跳**）
+### 3. ✅ 全链路重跑（**红线要求**）—— 2026-09-17 已完成
 
-- 引擎在本批改了 3 处（A3 / N1 / N2）→ 按项目红线，引擎大改后必须重跑一次全链路（含真实 AI 调用）。
-- 成本口径：**AI 调用数 = 2 × 触发 AI 的任务数**；跑之前先确认是否处于 DeepSeek 空闲档（半价）。
+- ✅ **复跑记录**：`docs/reports/E2E-RERUN-2026-09-17.md`（R0 基线 / R1 真实仓库 / R2 webhook / R3 对比 / R4 AI）。
+- ✅ `A1–A10` 逐条有结论；**AI 调用 4 次**（2 任务 × 2 次/任务），全在 DeepSeek **空闲档**。
+- ✅ **引擎改动（A3 / N1 / N2）未引入回归**：三份真实仓库基线与历史基准逐项一致（窗口对齐后）。
+- ✅ 新拿到比上轮更硬的 AI 证据：**同输入两轮，7/7 条 AI 文案不同**（缓存/硬编码不可能产生）。
+- 🔴 **复跑查出的口径级结论 → 已升级为独立待办（见 §四 第 2 条）**：
+  **A3 之后三个真实仓库全部 0 uncertain → AI 语义引擎在真实仓库上不再可达**，只剩合成 fixture 能触发。
 
 ### 4. G1 · 零背景读者向 HTML 项目说明书
 
@@ -237,12 +261,13 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
   **开场白已失效，开新对话前必须重写**（这次命中的是文档正文里的操作指令，不是链接）。
 - 价值判断：**比本台账里任何一条待办都高**——它直接对应「能不能把这个项目讲清楚」。
 
-### 5. 文档索引同步（小，1–2 行）
+### 5. ✅ 文档索引同步 —— 2026-09-17 已完成
 
-- `README.md` 末尾「这份文档不够看怎么办」表里**缺 `docs/AUDIT-BACKLOG.md`**（本文件）→ 补一行。
-- `README.md:120` 对 `tests/` 的覆盖描述写的是「分析核心 / 规则引擎 / AI 图谱 / 安全门禁 / webhook 适配」，
-  本批新增了 **worker 生命周期（`run-analysis`）** 与 **安全门禁集成层（`security/index`）** → 顺手补上。
-- ⚠️ 这正是 E4 那条「写死的清单最容易过期」的实例 —— 所以**做了就更新，不要挂成待办**。
+- ✅ `README.md` 末尾「这份文档不够看怎么办」表补两行：**`docs/AUDIT-BACKLOG.md`**（审计清单唯一归属地）
+  与 **`docs/reports/E2E-RERUN-2026-09-17.md`**（本轮复跑记录）。
+- ✅ `README.md` 的 `tests/` 覆盖描述补上 **DeepSeek 客户端 / 安全门禁集成层 / 入队与持久化 / worker 生命周期 / 调度编排**。
+- ✅ 顺手校验了 README 里 **8 个 md 链接全部存在**（0 个 404）—— 正是 E4 那条「写死的清单最容易过期」的实例。
+- ⚠️ **这条是「习惯」不是待办，别再往回挂**：以后**改了就更新**，本行只作一次结清记录。
 
 ---
 
@@ -270,6 +295,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | # | 条目 | 缺什么前置 |
 |---|---|---|
 | 1 | GitLab Commit Status 回写验证 | 需要 `GITLAB_TOKEN` + 一个真实 GitLab 项目。缺口只剩最后一跳（R2 已证明 `gitlabProjectId` 能正确落库） |
+| 2 | **AI 语义引擎在真实仓库上的可达性**（2026-09-17 复跑查出） | 需要判断：这是「**符合预期**（A3 治好了 0参→有参 那类白烧 token 的形态）」还是「**规则兜底面收窄过头**」。事实：三个真实仓库 × 4 类窗口（`main~20`/`main~21`/`HEAD~10`/`HEAD~20`/`db04dd7~5`/`db04dd7~10`）**全部 0 uncertain**，AI 路径只由合成 fixture 触发。**证据**：`docs/reports/E2E-RERUN-2026-09-17.md` §3。缺的前置是**一条决策**：要不要为「真实仓库里规则兜不住的形态」补样本（进「形态矩阵登记表」）；不补则需在文档里明写「AI 引擎在当前真实语料上不触发」 |
 
 ---
 
