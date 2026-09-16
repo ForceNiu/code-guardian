@@ -1,4 +1,4 @@
-// C5 · `src/worker/analyze.worker.cjs` 集成测试（真实 git 仓库 + 真实 Worker 线程）
+// C5 · `worker/analyze.worker.cjs` 集成测试（真实 git 仓库 + 真实 Worker 线程）
 //
 // 为什么这一层不用 mock：它正是「路径引号」事故所在层。
 // 事故本质：`execFileSync("git", ["show", "base:src/x.ts"])` 的参数里**多了引号**，
@@ -17,7 +17,7 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { Worker } = require("node:worker_threads");
 
-const WORKER_PATH = path.join(__dirname, "..", "src", "worker", "analyze.worker.cjs");
+const WORKER_PATH = path.join(__dirname, "..", "worker", "analyze.worker.cjs");
 
 let tmpRoot = null;
 let repoDir = null;

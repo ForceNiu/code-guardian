@@ -44,7 +44,7 @@ npm run scan . main~5 main            # 扫自己
    **新分支一律从同步后的 main 开**。历史错误就栽在这。
 4. **切分支前先 `git branch -vv` 确认本地 `main` == `origin/main`**（本地 main 极易落后）。
 5. **提交 `package.json` 前逐条比对 `git diff` 认领改动**（曾擅自加 husky/lint-staged 但没装）。
-6. **改 `src/worker/*.cjs` 后 dev 不会热加载**，必须重启 dev（`next build` 无此问题）。
+6. **改 `worker/*.cjs` 后 dev 不会热加载**，必须重启 dev（`next build` 无此问题）。
 7. 沙箱里 npm / next / eslint / tsc 一律加 `env -u NODE_OPTIONS`。
 8. 🔴 **push 失败先做「分层可达性探测」，不要先重试**：
    ```bash
@@ -138,14 +138,14 @@ npm run scan . main~5 main            # 扫自己
 ## 4. 文件地图
 
 ```
-src/worker/
+worker/                🔴 **Worker 线程侧引擎，有意放在 `src/` 之外**
   analyze-core.cjs     引擎纯函数：AST 解析 / 导出符号 / import 解析 / 差异对比 / 影响图穿透
   rules.cjs            确定性规则引擎：semver 口径定级（proven / heuristic / uncertain）
-  analyze.worker.cjs   worker 入口：git clone / checkout / 调 analyze-core（.cjs，不参与打包）
-  run-analysis.ts      worker 包装：自超时 + terminate() 回收
+  analyze.worker.cjs   worker 入口：git clone / checkout / 调 analyze-core（.cjs，不进 bundle、不参与 tsc）
 src/lib/
+  run-analysis.ts      主线程侧桥：new Worker + 软超时 + terminate() 回收（**会被 Next 打包**）
   persist.ts           结果落库（Prisma 事务 + 批量 deleteMany/createMany）
-  scheduler.ts         任务调度编排（⚠️ 零单测 —— 已知测试缺口里优先级最高的一个）
+  scheduler.ts         任务调度编排（13 条单测，含 7 个 fake；并发上限 3 + 原子认领 + 卡死回收）
   events.ts            SSE 事件总线
   ai/                  DeepSeek + LangGraph 语义引擎（只判断 uncertain 变更）
   security/            依赖 CVE 扫描 + 构建体积门禁
@@ -163,10 +163,16 @@ docs/
   frontend-redesign.md 前端视觉设计原则
   reports/             审查报告 + 端到端验证结论（e2e-logs/ 原始 dump 不入库）
 tests/
-  *.test.cjs / *.test.ts   node:test 单测 10 个文件（CI 第三道门禁）
+  *.test.cjs / *.test.ts   node:test 单测 17 个文件（CI 第三道门禁）
 LICENSE                  MIT / Copyright (c) 2026 ForceNiu
 .github/workflows/ci.yml lint → typecheck → test → build 四道门禁
 ```
+
+> 🔴 **`worker/analyze.worker.cjs` 只被「运行时字符串路径」引用**（`src/lib/run-analysis.ts:23`、`scripts/scan-repo.cjs:38`），
+> 不是 `import` —— 目的是让它既不进 Next bundle、也不被 Turbopack 改写。
+> **后果：改它的文件名 / 目录名不会有任何编译期报错，只在运行时挂（或更坏：静默跑到旧路径）。**
+> 同步点**共 4 处**（只算「改这个文件名/目录名就必须跟着改」的）：上面两个字符串 + `tests/analyze-worker.test.cjs:20`（构造）+ `tests/run-analysis.test.ts:93`（断言）。
+> 固定判据：`npm run scan <仓库> <base> <head>` 与基线数字逐项对齐（`analyze-worker.test.cjs` 真起 Worker 线程）。
 
 ---
 

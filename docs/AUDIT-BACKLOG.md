@@ -63,7 +63,7 @@
 | **C2** | `src/lib/persist.ts` | 10 条：事务内调用顺序、空表不进事务、3 条防御性解析（快照字段缺失/类型错乱时不炸） |
 | **C3** | `src/lib/enqueue.ts` | 10 条：`deriveName` 边界、SSE publish、duplicate 不广播、缺省字段按 `??` 口径落库 |
 | **C6** | `src/lib/ai/deepseek.ts` | 15 条：mock `node:https`/`node:http` 两条出网通路（代理 CONNECT / 直连）+ 请求形状 + 消息转换 + 限流退避 |
-| **C5** | `src/worker/analyze.worker.cjs` | 8 条：**真实 git 仓库 + 真 Worker 线程**的集成测试（这层不能 mock，见 C5 验收证据） |
+| **C5** | `worker/analyze.worker.cjs` | 8 条：**真实 git 仓库 + 真 Worker 线程**的集成测试（这层不能 mock，见 C5 验收证据） |
 | **C1** | `src/lib/scheduler.ts` | 13 条（7 个 fake）：启停 / 卡死回收 / 原子认领 / 并发上限 / **两道 `ctrl.cancelled` 守卫**（各自可独立证伪） |
 | — | 收口上一批的事故 | 删掉 `deepseek` / `scheduler` 两个无效测试；还原被砍坏的 `scheduler.ts` / `persist.ts`（与 main 一致） |
 
@@ -72,6 +72,35 @@
   合并后 main = `2e9b9ee2`；`merge_commit_sha` 已用 `verification.payload + gpgsig` **逐字节复现并同步到本地**。
 - ⚠️ 分支 `test/c-class-remaining`（head `3a75225`）在 squash 后**已「死」**（按约定保留未删）；
   后续改动一律从 main 开新分支。
+
+---
+
+### 2026-09-17 第五批 · 全项目结构审计（分支 `chore/backlog-sync-e2e-rerun` 之上 · ⚠️ **改动在工作区完成，尚未提交**）
+
+**审计方法**（可复现）：脚本解析**真实 import 语句 + 用 `fs.existsSync` 解析路径**，覆盖 86 个入库文件 + 磁盘上未入库文件，两套独立脚本交叉验证。
+> ⚠️ 方法红线：**不能拿子串匹配判「有没有被引用」** —— `input.tsx` 会匹配到任意 `input`，注释/fixture 里的 `./x` `./barrel` `./real` 会被当成真导入。初版就是这么误报 16 条「失效导入」的，逐条核过全是误判。
+
+**全过项（先说没问题的）**：相对 / `@/` 导入 **0 条失效**；`tests/` 17 个文件**全部**被 `npm test` 的 glob 命中（无静默漏跑）；`tsconfig` / `eslint.config.mjs` / `ci.yml` / `docker-compose.yml` / `next.config.ts` 引用的每个路径都真实存在；23 条「导出但无人用」全是 type-only 或 `ui/` 组件库常规冗余，**不是死代码**；未入库文件全在预期内（`.cache/` `fixtures/` `e2e-logs/` `.env` `next-env.d.ts`），**无「该入库却漏掉」**。
+
+| # | 发现（含代码位置） | 处理 |
+|---|---|---|
+| **S1** | 全仓 18 条 markdown 本地链接里**唯一失效**：`docs/reports/E2E-VERIFICATION-2026-09-16.md:7` 写 `](DEVELOPING.md)`，该文件在 `docs/reports/` 下 → 应 `](../DEVELOPING.md)`。**是同类事故（`README.md:169` 漏改）的残留** | ✅ 已修 |
+| **S2** | README 扩展指南 §3 写「`adaptWebhook` 的 **switch** 挂上」，实为**三元链**（`src/lib/webhook-adapters.ts:174-179`） | ✅ 已修 |
+| **S3** | `src/worker/` 是**混合生命周期目录**（边界只靠 `tsconfig.exclude` + 一行注释维持，目录本身看不出） | ✅ 已修（重构，见下） |
+| **S4** | **文档数字互相矛盾且与代码不符**：`architecture.md:79,155` + `product.md:53,110` 写「27 条查表规则」，README 写「25 条 + `unknown` 兜底」。实测 `RULE_TABLE` = **25 条具名 + `unknown`**（函数 10 / 字段 8 / enum 2 / class 5） | ✅ 已修（四处统一为「25 条 + 兜底」） |
+| **S5** | `docs/DEVELOPING.md` 文件地图两处过期：`scheduler.ts` 标「⚠️ 零单测」（实际 **13 条**，含 7 个 fake）、`tests/` 写「10 个文件」（实际 **17 个**） | ✅ 已修 |
+
+**S3 重构细节（本次唯一的结构性改动）**
+
+| 前 | 后 | 理由 |
+|---|---|---|
+| `src/worker/analyze-core.cjs`、`rules.cjs`、`analyze.worker.cjs` | **`worker/`（仓库顶层）** | 这三个不进 Next bundle、不参与 tsc，放在 `src/` 里靠 exclude 维持，边界不可见 |
+| `src/lib/run-analysis.ts` | **`src/lib/run-analysis.ts`** | 它**会**被 Next 打包（`scheduler.ts` import 它），本质是 `lib`；放在 `worker/` 只会强化误解 |
+
+- 搬迁前置核过：3 个 `.cjs` 内部只有相对 `require("./analyze-core.cjs")` / `require("./rules.cjs")`，**无 `__dirname` 依赖** → 整体移出 `src/` 不破坏内部引用。
+- 🔴 **同步点共 9 处**（改漏任何一处都是「运行时才挂」或「静默用旧路径」）：`src/lib/run-analysis.ts:23`（运行时字符串）、`scripts/scan-repo.cjs:38`（同上）、`tsconfig.json:42`（exclude）、`src/lib/scheduler.ts:4`、`tests/analyze-worker.test.cjs:20`、`tests/analyze-core.test.cjs:16,698`、`tests/rules.test.cjs:14`、`tests/run-analysis.test.ts:73,93`、`tests/scheduler.test.ts:152`。
+- 🔴 **本次差点改漏的那一处**：`src/lib/scheduler.ts:4` 用的是**别名 `@/worker/run-analysis`** —— 它**不含 `src/worker` 字样**，`grep "src/worker"` 扫不到。**扫搬迁残留必须同时扫别名形式**（`@/worker`、`"worker/`），或直接跑 typecheck。
+- ✅ 已把同步点写进 `docs/DEVELOPING.md` 文件地图（原来只靠源码注释），并标注「改路径 / 改目录名**不会有任何编译期报错**」。
 
 ---
 
@@ -92,11 +121,11 @@
 | # | 模块 | 行数 | 测什么 | 难度 |
 |---|---|---|---|---|
 | ~~C7~~ | ~~`src/lib/security/index.ts`~~ | 40 | 「失败不阻断主链路」兜底语义 | ✅ **已完成**（6 条断言，见下） |
-| ~~C4~~ | ~~`src/worker/run-analysis.ts`~~ | 54 | 三条 settle 路径（message / error / exit）+ 超时 `terminate()` | ✅ **已完成**（8 条断言，见下）；**并查出 N3** |
+| ~~C4~~ | ~~`src/lib/run-analysis.ts`~~ | 54 | 三条 settle 路径（message / error / exit）+ 超时 `terminate()` | ✅ **已完成**（8 条断言，见下）；**并查出 N3** |
 | ~~C2~~ | ~~`src/lib/persist.ts`~~ | 95 | 快照→缓存的防御性解析；事务内调用顺序 | ✅ **2026-09-16 已完成**（10 条断言，见下） |
 | ~~C3~~ | ~~`src/lib/enqueue.ts`~~ | 71 | created / duplicate(P2002) / 其他错误 rethrow / SSE 广播 / `deriveName` | ✅ **2026-09-16 已完成**（10 条断言，见下） |
 | ~~C6~~ | ~~`src/lib/ai/deepseek.ts`~~ | 263 | 三种降级分支（代理 CONNECT / httpDirect / 失败）+ 限流退避 | ✅ **2026-09-16 已完成**（15 条断言，见下）。上一版曾写过一版**假的**，已作废（见下方事故记录） |
-| ~~C5~~ | ~~`src/worker/analyze.worker.cjs`~~ | 257 | git checkout/diff/show 的参数数组调用 | ✅ **2026-09-16 已完成**（8 条断言，真实 git 仓库 + 真 Worker 线程，见下） |
+| ~~C5~~ | ~~`worker/analyze.worker.cjs`~~ | 257 | git checkout/diff/show 的参数数组调用 | ✅ **2026-09-16 已完成**（8 条断言，真实 git 仓库 + 真 Worker 线程，见下） |
 | ~~C1~~ | ~~`src/lib/scheduler.ts`~~ | 197 | 编排层：原子认领 / 超时置 failed / 取消后不覆盖 done | ✅ **2026-09-16 已完成**（13 条断言，7 个 fake，见下）。上一版曾写过一版**假的且砍坏了生产代码**，已作废（见下方事故记录） |
 
 **开工顺序**：~~C7 → C4 → C2 → C3 → C6 → C5 → C1~~ ✅ **全部完成**。
@@ -268,6 +297,18 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 - ✅ `README.md` 的 `tests/` 覆盖描述补上 **DeepSeek 客户端 / 安全门禁集成层 / 入队与持久化 / worker 生命周期 / 调度编排**。
 - ✅ 顺手校验了 README 里 **8 个 md 链接全部存在**（0 个 404）—— 正是 E4 那条「写死的清单最容易过期」的实例。
 - ⚠️ **这条是「习惯」不是待办，别再往回挂**：以后**改了就更新**，本行只作一次结清记录。
+
+---
+
+### 6. 结构审计剩下的 3 条 P2（低成本文档收口）
+
+> 来源：2026-09-17 全项目结构审计（见 §一 第五批）。这三条**都不影响功能**，但都会被评审/招聘方看到。
+
+| # | 条目（含位置） | 动作 | 风险 / 为什么没顺手做 |
+|---|---|---|---|
+| **S6** | `.gitignore` 只覆盖 `.env` / `.env.local` / `.env*.local` / `*.bak`，**漏 `.env.*`** → `.env.production` / `.env.test` 不会被忽略 | 加 `.env.*`，**必须同时加 `!.env.example`** | 🔴 **这是个陷阱**：`.env.*` 会把 `.env.example` 一起忽略 → 静默不再跟踪。验收硬判据：`git check-ignore -v .env.example` **必须无输出**，且 `git ls-files .env.example` 仍有它。c 范围只含「记进台账」，未含改文件 |
+| **S7** | `docs/reports/CODE_REVIEW_REPORT.md` 数字过期：正文写「全套 **118** case」「`scheduler` 仍无单测」（今 **237 pass** / scheduler **13 条**）。文件头**已有**勘误 banner，但未覆盖这两处 | 在该 banner 里补一行：「测试规模与 scheduler 状态以 README / 本台账为准」 | 历史件且日期已标，属「可信度优化」非「错误」；但评审会拿它跟 README 的数字对照 |
+| **S8** | `.env.example` 未列 `HTTP_PROXY` / `HTTPS_PROXY`，而 `deepseek.ts` **刻意读它**（绕开 undici 不读代理的坑），README 扩展指南还专门写了一段 | 加两行注释说明（可选，非密钥） | 同上 —— 代码在意、模板没写，属「文档没跟上设计」 |
 
 ---
 

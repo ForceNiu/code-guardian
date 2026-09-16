@@ -13,7 +13,7 @@ const {
   diffSymbols,
   resolveFileSymbols,
   resolveExportOrigin,
-} = require("../src/worker/analyze-core.cjs");
+} = require("../worker/analyze-core.cjs");
 
 test("md5 返回标准哈希", () => {
   assert.equal(md5(""), "d41d8cd98f00b204e9800998ecf8427e");
@@ -695,7 +695,7 @@ test("resolveExportOrigin 可穿透到 base 侧已删除文件（删除文件的
 
 // ---- tsconfig 路径别名解析 ----
 
-const { resolveImportWithAlias, buildPathAliases, parseJsonc } = require("../src/worker/analyze-core.cjs");
+const { resolveImportWithAlias, buildPathAliases, parseJsonc } = require("../worker/analyze-core.cjs");
 
 test("parseJsonc 能剥离注释与尾逗号", () => {
   const text = `{

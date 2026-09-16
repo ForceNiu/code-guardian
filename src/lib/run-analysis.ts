@@ -16,8 +16,11 @@ const WORKER_TIMEOUT_MS = 240000;
  */
 export function runAnalysis(input: WorkerInput): Promise<WorkerOutput> {
   return new Promise((resolve, reject) => {
-    // 用运行时字符串路径引用，避免被 Next/Turbopack 打包进 bundle
-    const workerPath = path.join(process.cwd(), "src", "worker", "analyze.worker.cjs");
+    // 🔴 用**运行时字符串**引用，不是 import：引擎（worker/*.cjs）有意放在 src/ 之外，
+    //    既不进 Next/Turbopack 的 bundle，也不参与 tsc 的类型检查（它是 .cjs）。
+    //    代价：静态工具看不出这个文件在被使用 → 改路径 / 目录名不会有任何编译期报错，
+    //    只在运行时挂。同步点共 3 处：本行、scripts/scan-repo.cjs、tests/*.test.cjs|ts。
+    const workerPath = path.join(process.cwd(), "worker", "analyze.worker.cjs");
     const worker = new Worker(workerPath, { workerData: input });
 
     let settled = false;

@@ -1,4 +1,4 @@
-// C4 · `src/worker/run-analysis.ts` —— 两层超时里的「Worker 侧软超时 + terminate()」
+// C4 · `src/lib/run-analysis.ts` —— 两层超时里的「Worker 侧软超时 + terminate()」
 //
 // 为什么要测这一条（这是全项目最反直觉的一处设计）：
 //   scheduler 的任务级超时（5 分钟）**杀不掉 worker 线程** —— 它只能改数据库里的任务状态，
@@ -70,7 +70,7 @@ before(() => {
 let runAnalysis: (input: WorkerInput) => Promise<unknown>;
 
 before(async () => {
-  ({ runAnalysis } = await import("../src/worker/run-analysis"));
+  ({ runAnalysis } = await import("../src/lib/run-analysis"));
 });
 
 // ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ test("自检：mock 确实替换了 node:worker_threads（不生效则本文件�
   // 若 mock 未生效：这里会真的去起一个 Worker 线程（路径存在但会跑真实分析），
   // `lastWorker()` 直接抛「从未被构造」→ 用例必红。
   const worker = lastWorker();
-  assert.equal(worker.workerPath, path.join(process.cwd(), "src", "worker", "analyze.worker.cjs"));
+  assert.equal(worker.workerPath, path.join(process.cwd(), "worker", "analyze.worker.cjs"));
   assert.deepEqual(worker.options?.workerData, INPUT);
 
   worker.emit("message", { result: {}, symbolTable: [] });

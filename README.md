@@ -9,29 +9,29 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 
 ## 核心能力（已实现）
 
-| 能力 | 说明 |
-| :--- | :--- |
-| 多源 Webhook | `POST /api/webhook` 幂等入队，适配 GitLab MR / GitHub push / GitHub PR，唯一索引防重 |
-| 手动触发 | 首页粘贴仓库地址 + base/head ref 即可分析 |
-| AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里，不阻塞主线程 |
-| 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 |
-| 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」→ 改一个函数立刻知道影响范围 |
-| 确定性规则引擎 | 25 条查表规则 + `unknown` 兜底（函数签名/字段/别名/重命名导出/enum/class），semver 判据 + confidence 三档 |
-| AI 语义引擎 | 规则判为 `uncertain` 的变更送 LangGraph 4 节点（DeepSeek）补判定，失败静默降级 |
-| 影响链路 | 对比 base/head 导出签名，输出「文件 → 符号 → 变更类型 → 影响文件」 |
-| 任务调度 | 数据库状态机 + 5s 轮询 + 信号量限 3 并发，无 Redis/队列 |
-| 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 |
-| Monaco Diff | 新旧文件左右对比，高亮副作用行 |
-| 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 |
-| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值）+ GitLab Commit Status 回写（MR 合并红绿灯） |
+| 能力 | 说明 | 解决什么问题 |
+| :--- | :--- | :--- |
+| 多源 Webhook | `POST /api/webhook` 幂等入队，适配 GitLab MR / GitHub push / GitHub PR，唯一索引防重 | 不用改现有 CI；同一 MR 重复触发**不会重复烧 AI 的钱** |
+| 手动触发 | 首页粘贴仓库地址 + base/head ref 即可分析 | 还没接 webhook 也能先看到效果 |
+| AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里 | 分析大仓库时不卡住接口 |
+| 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 | 想比哪两个提交就比哪两个，不受「当前分支」限制 |
+| 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」 | 回答**「改这个函数会影响谁」**——ESLint 不回答的问题 |
+| 确定性规则引擎 | 25 条查表规则 + `unknown` 兜底（函数签名/字段/别名/重命名导出/enum/class），semver 判据 + confidence 三档 | 约 80% 的变更**不送 AI**：结论可复现、成本可控 |
+| AI 语义引擎 | 规则判为 `uncertain` 的变更送 LangGraph 4 节点（DeepSeek）补判定，失败静默降级 | 规则兜不住的那部分才送 AI；**AI 挂了也不阻塞出报告** |
+| 影响链路 | 对比 base/head 导出签名，输出「文件 → 符号 → 变更类型 → 影响文件」 | 直接拿来当**合并门禁的判据**，不用人再读一遍 diff |
+| 任务调度 | 数据库状态机 + 5s 轮询 + 信号量限 3 并发，无 Redis/队列 | 单机就能跑，不引入额外中间件 |
+| 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 | 长任务不假死，用户知道现在到哪一步 |
+| Monaco Diff | 新旧文件左右对比，高亮副作用行 | 从「有影响」落到「影响了哪一行」 |
+| 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 | 二次分析只算变更文件，不重扫全仓 |
+| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值）+ GitLab Commit Status 回写 | 不只查代码本身，还查**依赖带来的漏洞与体积** |
 
 ### 能力落在哪个文件
 
 | 能力 | 代码位置 |
 | :--- | :--- |
-| 分析流水线总控 | `src/worker/run-analysis.ts` → `src/worker/analyze.worker.cjs` |
-| AST 解析 / 符号 / 差异 / 影响图 | `src/worker/analyze-core.cjs` |
-| 25 条规则 + 定级 | `src/worker/rules.cjs` |
+| 分析流水线总控 | `src/lib/run-analysis.ts`（主线程） → `worker/analyze.worker.cjs`（Worker 线程） |
+| AST 解析 / 符号 / 差异 / 影响图 | `worker/analyze-core.cjs` |
+| 25 条规则 + 定级 | `worker/rules.cjs` |
 | 任务调度（轮询/限并发/超时） | `src/lib/scheduler.ts` |
 | 结果落库 / 增量缓存 | `src/lib/persist.ts` |
 | SSE 事件总线 | `src/lib/events.ts` |
@@ -57,13 +57,24 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 
 ## 技术栈
 
-- **Next.js 16**（App Router）+ **React 19** + **TypeScript**（strict）
-- **Prisma 6** + **PostgreSQL**（Neon 云库）
-- **@babel/parser / @babel/traverse**（AST）
-- **@langchain/langgraph**（AI 语义引擎 4 节点管线）+ **DeepSeek**
-- **@monaco-editor/react**（Diff 对比）
-- **worker_threads**（CPU 隔离）
-- **zod**（入参校验）
+版本取自 `package.json` 的实际声明（`^` 为语义化范围内的最低版本）。运行环境：**Node 22**（CI 与本地一致）。
+
+| 技术 | 版本 | 作用 |
+| :--- | :--- | :--- |
+| Next.js | `^16.3.4` | 页面与 API 路由（App Router） |
+| React / React DOM | `^19.2.8` | 报告页与组件 |
+| TypeScript | `^5.9.3` | strict 全量类型（CI 第二道门禁） |
+| Prisma / Prisma Client | `^6.19.3` | ORM、迁移、增量缓存落库 |
+| PostgreSQL | 本地用 `postgres:16-alpine`；线上 Neon 云库 | 任务、文件快照、导出符号反向索引 |
+| Tailwind CSS | `^4.3.3` | 样式（v4，无 `tailwind.config.js`） |
+| @babel/parser / @babel/traverse | `^7.29.8` | AST 解析与遍历（分析引擎的核心） |
+| @langchain/langgraph | `^1.4.13` | AI 语义引擎 4 节点管线 |
+| @langchain/core | `^1.2.9` | LangGraph 的运行时依赖 |
+| DeepSeek | HTTP 直发（无 SDK） | 语义判定；`node:https`/`node:http` 直连，走代理时自动降级 |
+| @monaco-editor/react | `^4.7.0` | 新旧文件 Diff 对比 |
+| zod | `^3.25.76` | Webhook 与手动触发入参校验 |
+| node:worker_threads | Node 22 内置 | CPU 密集分析隔离在主线程之外 |
+| @phosphor-icons/react / framer-motion | `^2.1.10` / `^13.2.0` | 图标与动效（前端视觉层） |
 
 ---
 
@@ -109,13 +120,42 @@ curl -X POST http://localhost:3000/api/webhook \
 
 ---
 
+## 部署
+
+生产运行 = 一个 Next.js 服务器 + 一个 Postgres。**不需要 Redis、消息队列或额外的 worker 进程**——
+调度器随 `instrumentation.ts` 在应用启动时自动拉起（5s 轮询，并发上限 3），分析跑在进程内的 `worker_threads` 里。
+
+```bash
+npm ci
+npx prisma generate      # 项目无 postinstall，必须手动跑一次（CI 也是显式一步）
+npx prisma migrate deploy  # 只应用已有迁移，不生成新迁移
+npm run build
+npm run start              # 默认监听 3000
+```
+
+> 🔴 **上生产前必须先配好两个写端点的口令**（`MANUAL_TRIGGER_TOKEN` / `WEBHOOK_SECRET`）。
+> 它们是 **fail-closed** 的——不配就返回 503，对应功能整段不可用。见下方「环境变量」。
+
+| 项 | 值 | 说明 |
+| :--- | :--- | :--- |
+| 应用端口 | `3000` | `npm run start` 的默认端口 |
+| 数据库 | Neon 云库，或本地 Docker | 本地：`npm run db:up` / `db:down` → `postgres:16-alpine`，映射宿主机 `5432`，数据卷 `pgdata`，带 `pg_isready` 健康检查 |
+| 迁移（开发） | `npm run prisma:migrate` | 会**生成**新迁移文件 |
+| 迁移（生产） | `npm run prisma:deploy` | **只应用**已有迁移 |
+| 查库 | `npm run prisma:studio` | 可视化查看任务、快照与符号索引 |
+| CI | `.github/workflows/ci.yml` | 单 job，Node 22，依次 `lint → typecheck → test → build`，超时 15 min；push 到 `main` 与所有 PR 都触发 |
+
+> 📌 本仓库**没有绑定任何托管平台的自动部署**：合并到 `main` 不会触发线上发布，部署方式由你自己选。
+
+---
+
 ## 目录结构
 
 ```
 prisma/            schema（5 张表）+ 迁移 + seed
 src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
-src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型
-src/worker/        Worker 线程（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）
+src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
+worker/            Worker 线程侧引擎（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）—— **有意放在 `src/` 之外**：不进 Next bundle、不参与 tsc
 src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
 tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
 scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
@@ -166,6 +206,35 @@ docs/              产品文档 · 架构文档 · 前端设计说明 · reports
 > 敞开等于替别人付账。本地开发也需显式配好这两个变量之一才能提交任务。
 
 完整说明见 `.env.example`。数据库二选一：Neon 云库，或 `docker compose up -d` 起本地 Postgres。
+
+---
+
+## 扩展指南
+
+三处最常改的地方，每处都标了**改哪个文件**和**改完必须做什么**。
+
+### 1. 加一条定级规则
+
+- `worker/rules.cjs`：`classifyFunctionChange` / `classifyTypeFieldChange` / `classifyEnumChange` / `classifyClassChange` 负责产出变更 **label**，再到 `RULE_TABLE` 加一行 `label: { severity, confidence }`。
+- `confidence` 三档的含义决定了钱花在哪：`proven` = 直接定级、直接当门禁（**0 Token**）；`heuristic` = 需复核但不阻断；`uncertain` = 才送 AI 语义引擎。
+  → **能算准的别塞进 `uncertain`**，那是白烧 token。
+- 改完必须做两件事：① 在 `tests/rules.test.cjs` 补断言，并做**灵敏度验证**（把新规则临时改回旧写法 → 确认测试变红 → 还原）；② 跑 `npm run scan <仓库路径> <base> <head>` 与基线数字对比。
+  ⚠️ **基线数字必须连窗口一起记**：`main~N..main` 不是固定输入，`main` 前进一次就是另一个窗口。
+
+### 2. 换 AI 供应商 / 换模型
+
+- 唯一入口：`src/lib/ai/enrich.ts` 的 `enrichUncertain`。
+- 管线只依赖接口 `LLMInvoker`（`src/lib/ai/semantic-graph.ts`）：**实现一个带 `invoke` 的对象传给 `buildSemanticGraph(llm)` 即可，4 个节点不用动**。
+- 默认真实实现是 `createLLM()`（`src/lib/ai/deepseek.ts`）→ 返回 `DeepSeekLLM`；它返回 `null` 时整条 AI 路径静默跳过（未配 key 就是这个状态）。
+- ⚠️ `deepseek.ts` 刻意**不用 `fetch`**，改用 `node:https` / `node:http` / `node:tls` 直发——因为 undici 不读 `HTTPS_PROXY`，在代理环境会挂死。换供应商时若改用 SDK，先确认代理行为。
+
+### 3. 接新的事件源
+
+- `src/lib/webhook-adapters.ts` 四步：`WebhookSource` 加类型 → `detectEvent(headers)` 加识别 → 写 `adaptXxx(payload)` → 在 `adaptWebhook` 的**分派分支**里挂上（现为三元链，不是 switch）。
+- **幂等不用自己写**：唯一索引 `(repoId, mrId, commitSha)` 兜住，重复触发由 `enqueueTask` 捕获 P2002 返回 `duplicate`。
+- 签名校验现状：GitLab 比对 `x-gitlab-token`，GitHub 比对 `x-hub-signature-256`（`timingSafeEqual` 防时序侧信道）。
+
+> 🔴 以上任一处改动都动到了**判定逻辑**或**外部调用**，因此收尾固定跑四道门禁 + 一次全链路复跑（见 [`docs/DEVELOPING.md`](docs/DEVELOPING.md) 的红线；复跑记录见 [E2E-RERUN-2026-09-17](docs/reports/E2E-RERUN-2026-09-17.md)）。
 
 ---
 
