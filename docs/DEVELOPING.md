@@ -159,6 +159,8 @@ scripts/
 docs/
   architecture.md      架构与规则口径
   product.md           产品说明
+  AUDIT-BACKLOG.md     审计清单唯一归属地（做 / 不做 / 待定三态）—— **状态一变就改它**
+  G1-KICKOFF.md        零背景 HTML 说明书（G1）的开工说明，自包含（新对话读它即可开工）；**用完即可删**
   DEVELOPING.md        本文件（红线 / 方法论 / 文件地图）
   frontend-redesign.md 前端视觉设计原则
   reports/             审查报告 + 端到端验证结论（e2e-logs/ 原始 dump 不入库）
