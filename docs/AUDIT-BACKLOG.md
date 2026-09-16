@@ -60,27 +60,120 @@
 
 ## 二、🔜 待做（按执行顺序）
 
-### 0. 🟡 收口分支 `fix/audit-tier1-3` —— **已提交 / 已推送 / PR #17 / CI 绿，只差合并**
+### 0. ✅ 收口分支 `fix/audit-tier1-3` —— **已合并**（main = `30c7dbb`）
 
-- ✅ 3 组提交（2026-09-16 20:0x）：`0073d81` 引擎 · `1eaa3bf` 端点与打磨 · `5a3883f` 测试与文档（25 文件 `+1182 −594`）。
-- ✅ PR **#17**（https://github.com/ForceNiu/code-guardian/pull/17），**CI 在 `5a3883f` 上全绿**。
-- ✅ 合并四重复核已过：`state=open` / `mergeable_state=clean` / CI 绿 / 待 `PUT /merge` 带 `sha` 锁定。
-- ⏭️ **只差一步：合并需用户口头批准**（协议⑤ —— 用户批的是「提交」，未含合并）。
-- 📌 提交前已过 PII 门禁（新增行 + 新文件扫 `/Users/`、内网 IP、`localhost:端口`、`/tmp/`，真实命中 0）。
+- ✅ PR **#17**（https://github.com/ForceNiu/code-guardian/pull/17）squash merge 完成，CI 全绿。
+- ✅ 内容完整性已验：`git diff --stat <分支head> origin/main` 为空
+  （⚠️ 不用 `--is-ancestor` —— squash 是新提交，必然不成立）。
+- ✅ 本节原写「只差合并批准」，**2026-09-16 23:0x 同步为已完成**。
 
 ### 1. C 类测试缺口 · 7 个模块（**用户 2026-09-16 定为「都做」**）
 
 | # | 模块 | 行数 | 测什么 | 难度 |
 |---|---|---|---|---|
-| ~~C7~~ | ~~`src/lib/security/index.ts`~~ | 40 | 「失败不阻断主链路」兜底语义 | ✅ **2026-09-16 已完成**（6 条断言，见下） |
-| ~~C4~~ | ~~`src/worker/run-analysis.ts`~~ | 54 | 三条 settle 路径（message / error / exit）+ 超时 `terminate()` | ✅ **2026-09-16 已完成**（8 条断言，见下）；**并查出 N3** |
-| C2 | `src/lib/persist.ts` | 95 | 快照→缓存的防御性解析；积批删范围；符号行展开 | ⏭️ **下一步**（mock `./prisma`） |
-| C3 | `src/lib/enqueue.ts` | 71 | created / duplicate(P2002) / 其他错误 rethrow | 中 |
-| C6 | `src/lib/ai/deepseek.ts` | 263 | 三种降级分支（代理 CONNECT / httpDirect / 失败） | 中（需 mock fetch 与环境变量） |
-| C5 | `src/worker/analyze.worker.cjs` | 257 | git checkout/diff/show 的参数数组调用 | **最难**（CJS + worker 方式运行；需 tmp 仓库做集成测试）。⚠️ 但这层正是「路径引号」事故所在层 |
-| C1 | `src/lib/scheduler.ts` | 197 | 编排层：原子认领 / 超时置 failed / 取消后不覆盖 done | 价值最高，fake 最多（7 个） |
+| ~~C7~~ | ~~`src/lib/security/index.ts`~~ | 40 | 「失败不阻断主链路」兜底语义 | ✅ **已完成**（6 条断言，见下） |
+| ~~C4~~ | ~~`src/worker/run-analysis.ts`~~ | 54 | 三条 settle 路径（message / error / exit）+ 超时 `terminate()` | ✅ **已完成**（8 条断言，见下）；**并查出 N3** |
+| ~~C2~~ | ~~`src/lib/persist.ts`~~ | 95 | 快照→缓存的防御性解析；事务内调用顺序 | ✅ **2026-09-16 已完成**（10 条断言，见下） |
+| ~~C3~~ | ~~`src/lib/enqueue.ts`~~ | 71 | created / duplicate(P2002) / 其他错误 rethrow / SSE 广播 / `deriveName` | ✅ **2026-09-16 已完成**（10 条断言，见下） |
+| ~~C6~~ | ~~`src/lib/ai/deepseek.ts`~~ | 263 | 三种降级分支（代理 CONNECT / httpDirect / 失败）+ 限流退避 | ✅ **2026-09-16 已完成**（15 条断言，见下）。上一版曾写过一版**假的**，已作废（见下方事故记录） |
+| ~~C5~~ | ~~`src/worker/analyze.worker.cjs`~~ | 257 | git checkout/diff/show 的参数数组调用 | ✅ **2026-09-16 已完成**（8 条断言，真实 git 仓库 + 真 Worker 线程，见下） |
+| ~~C1~~ | ~~`src/lib/scheduler.ts`~~ | 197 | 编排层：原子认领 / 超时置 failed / 取消后不覆盖 done | ✅ **2026-09-16 已完成**（13 条断言，7 个 fake，见下）。上一版曾写过一版**假的且砍坏了生产代码**，已作废（见下方事故记录） |
 
-**开工顺序**：~~先立测试基建 → C7 打通范式~~ ✅ **已打通** → ~~C4~~ ✅ → C2 → C3 → C6 → C5 → C1。
+**开工顺序**：~~C7 → C4 → C2 → C3 → C6 → C5 → C1~~ ✅ **全部完成**。
+
+#### 🔴 事故记录：2026-09-16 那批「C2–C1 单测」为什么被判作废
+
+**这是本项目迄今最严重的一次过程事故——「测试绿了」是靠改生产代码换来的。**
+
+- **C6**：`tests/deepseek.test.ts` mock 了一个**根本不存在的导出** `askDeepSeek`
+  （`src/lib/ai/deepseek.ts` 真实导出只有 `DeepSeekLLM` 类与 `createLLM()`）。
+  → 4 条断言全是「mock 和自己比」，**0 覆盖率**。
+- **C1**：为让 `new Scheduler()` 这个**全仓无人使用**的 API 通过测试，
+  把 `src/lib/scheduler.ts` **从 197 行真实实现砍成 33 行 stub** ——
+  丢掉 `startScheduler`/`stopScheduler`、原子认领、超时置 failed、卡死任务回收、整条流水线。
+  → `src/instrumentation.ts:5` 报 **TS2339**，**应用启动时的调度器引导已断**。
+- **C2**：夹具字段凭猜测写、与 `types.ts` 不符（`importers` 缺失、`from` 应为 `source`）；
+  还把一个**测试专用函数 `loadSnapshot` 塞进了生产 `persist.ts`**（`src/` 内零调用者，用 `require()`）。
+- **C3** 是那批里唯一有效的（实现本来就在 main 上，测试也真打在它上面）。
+
+**为什么没被当场发现**：只跑了 `npm test`（**199 绿**）就下了「完成」的结论，没跑 `typecheck` / `lint`。
+假绿通道是敞开的 —— 测试跑在 `tsx` 上**不做类型检查**，而 `--experimental-test-module-mocks`
+允许 `mock.module` **往一个没有该具名导出的模块里注入假导出**。只有 `typecheck` 会红：
+
+```
+tests/deepseek.test.ts:27  TS2339: Property 'askDeepSeek' does not exist ...
+src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ...   ← 入口已断
+```
+
+**已写入技能 `detection-regression-discipline`（⑥ 第 5 条硬规则 + ⑥-b + 危险信号清单 4 条）**，三条对策：
+
+1. 改完**四道门禁全跑**，`npm test` 绿**不算数**。
+2. 自检用例只证明「mock 在调用路径上」，**没证明「被 mock 的东西在生产里存在」**
+   → **被 mock 的导出必须能在真实模块里 grep 到**。
+3. 断言里出现 `assert.ok(true)`、或「mock 的返回值 == mock 自己设定的值」→ **恒真摆设，等于没写**。
+
+**本次处置（2026-09-16 23:1x）**：`git checkout -- src/lib/scheduler.ts src/lib/persist.ts` 还原生产代码；
+删掉 `tests/deepseek.test.ts` 与 `tests/scheduler.test.ts`；`tests/persist.test.ts` 与 `tests/enqueue.test.ts` 重写为打在真实行为上。
+→ 四道门禁：`lint` 0 / `typecheck` 0 / `test` **201 pass** / `build` ✅。
+
+#### C2 的验收证据（2026-09-16）
+
+- 断言 **10 条**，全绿。覆盖：事务内调用顺序（deleteMany→createMany→upsert）、空表不进事务、
+  四张缓存表的拆分、不串仓、以及 **3 条防御性解析**（`symbols` 为 null / 旧缓存缺 `reexports` / `exports` 是脏数据）。
+- 防御性那 3 条是真打在 `readSymbolCache` 的 `if (snap.symbols)` 与逐字段 `Array.isArray` 上 ——
+  这正是台账原本要求 C2 测的「快照→缓存的防御性解析」。
+
+#### C5 的验收证据（2026-09-16）
+
+- 断言 **8 条**，全绿。**集成测试**：真实 git 仓库（4 个文件，main=base / feature=head）+ **真 Worker 线程**。
+- **为什么这层不能 mock**：「路径引号」事故的本质是 `execFileSync("git", ["show", "base:src/x.ts"])` 的参数里多了引号
+  → git 去找一个名字带引号的文件 → 找不到 → 返回 `null` → **所有文件被误判 added**。
+  mock 只会按你写的参数返回你想要的结果，**这类缺陷靠 mock 永远测不出来**，必须真过一遍 git。
+- **灵敏度验证（点名式）**：把 `git show` 的路径临时加回引号 → **4 条变红**
+  （事故守护 / 签名变更 / removed / diff 全文），其余 4 条保持绿
+  （自检 / 影响链路 / 增量缓存 / 错误回传 —— 本来就不依赖 base 内容，符合预期）。
+  还原后 SHA-256 逐字节一致。
+- 顺带覆盖：增量缓存（第一轮 0 命中、第二轮命中且**结论不变**）、
+  headRef 不可达时**回传 error 而不是崩掉不回消息**（后者 = Promise 永不 settle = N3 那类事故）。
+
+#### C1 的验收证据（2026-09-16）
+
+- 断言 **13 条**，全绿，7 个 fake（prisma / run-analysis / persist / enrich / security / gitlab-status / events）。
+- 覆盖：启停（重复 `startScheduler` 不重复启动）、卡死中间态回收、原子认领失败则跳过、
+  并发上限（槽位满后第二轮不再查 pending）、`take = 剩余槽位`、
+  仓库不存在 → failed、成功路径 `analyzing→reporting→done` 且每步广播、
+  分析抛错 → failed + GitLab 回写 failed、**两道 `ctrl.cancelled` 守卫**。
+- 🔴 **灵敏度验证做过两轮，第一轮是失败的 —— 值得记下来**：
+  - 初版只写了一条「被超时后不该落 done」，结果**删掉任意一道守卫测试都还是绿的** ——
+    因为另一道会兜住。这种断言**粒度不够，等于没写到点上**（和「两道都在」等价）。
+  - 改成两条、各自把「卡住的位置」放在对应守卫之前后：
+    **删守卫① → 恰好「守卫①」红，其余 12 条绿；删守卫② → 恰好「守卫②」红，其余 12 条绿。**
+  - → 判据：**删掉某个守卫后测试没变红，说明你测的不是它。**
+- 🔧 **模块级状态陷阱**（`started` / `running` 都是 `let`，跨用例共享）：
+  `tick()` 不导出，只能靠「stop → start」触发新一轮；每用例开头必须先 `stopScheduler()`，
+  否则第二次 start 直接 return。需要挂起时用 holder 的 manual 模式，**用完务必 `releaseAll()`** ——
+  否则 `running` 下不来，会把后面的用例全卡在并发上限上。
+
+#### C6 的验收证据（2026-09-16）
+
+- 断言 **15 条**，全绿。`createLLM` 无 key 返回 null / 有 key 返回实例；请求形状（URL / Bearer / 模型 /
+  思考模式 / `reasoning_effort` / `temperature`）；消息转换（string → user、角色映射、非字符串 `JSON.stringify`）；
+  失败与重试；两条出网通路。
+- **网络层怎么断**：该模块刻意不用 `fetch`，而是 `node:https` / `node:http` / `node:tls` 直发
+  （源码注释写了原因：undici 不读 `HTTPS_PROXY` 会挂死）。所以 mock 这两个**内置模块**，
+  而不是 mock fetch —— 一层 fake 就够。请求体不用绕路截获，`req.write()` 就是天然记录点。
+- 🔎 **写测试时查出的真实行为（值得留意，暂不改）**：`invoke` 的 `catch` 块**不区分「HTTP 错误」与「网络异常」**，
+  所以 500、CONNECT 失败这类**确定性错误同样会被重试满 4 次**（退避 500/1000/2000ms）。
+  → 后果：一个必然失败的 400 要白花 ~3.5s 和 4 次请求。
+  → **处置：本次只如实写进断言，未改代码**（协议⑤）。若要改，方向是让非 429 / 非 5xx 的错误直接抛、不重试。
+- 🔧 **踩坑**：`mock.timers.enable()` 必须**早于**被测代码调度定时器，否则静默失效 → 测试卡到 exit 137 零输出。
+  已写进技能 `detection-regression-discipline` 附一。
+
+#### C3 的验收证据（2026-09-16）
+
+- 断言 **10 条**，全绿。除幂等主路径外，新增了两条原本没覆盖的真实行为：
+  `deriveName` 的边界（尾斜杠 + `.git` 都剥掉）、**M4 SSE 的 `publish(taskId, {status:"pending"})`**，
+  以及「`duplicate` 分支不该广播」「缺省字段按 `??` 口径落库（空串 / `null`）」。
 
 #### ✅ 已落地的范式（后续模块照抄这个模板，别再重新踩一遍）
 
