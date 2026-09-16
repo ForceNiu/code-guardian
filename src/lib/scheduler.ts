@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { Task } from "@prisma/client";
 import { prisma } from "./prisma";
-import { runAnalysis } from "@/worker/run-analysis";
+import { runAnalysis } from "@/lib/run-analysis";
 import { persistSymbolTable, readSymbolCache } from "./persist";
 import { enrichUncertain } from "./ai/enrich";
 import { enrichSecurity } from "./security";

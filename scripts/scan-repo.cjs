@@ -35,7 +35,7 @@ const name = path.basename(SRC);
 const workdir = `/tmp/cg-scan-${name}`;
 fs.rmSync(workdir, { recursive: true, force: true });
 
-const w = new Worker(path.join(CG, "src", "worker", "analyze.worker.cjs"), {
+const w = new Worker(path.join(CG, "worker", "analyze.worker.cjs"), {
   workerData: { repoId: `local-${name}`, gitUrl: SRC, baseRef, headRef, workdir },
 });
 

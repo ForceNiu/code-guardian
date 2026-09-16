@@ -2,7 +2,7 @@
 // 范式见 tests/security-index.test.ts 与技能 detection-regression-discipline ⑥
 //
 // 被 mock 的 7 个模块，全部是 scheduler.ts 顶层真实 import 的（先 grep 过再写）：
-//   ./prisma · @/worker/run-analysis · ./persist · ./ai/enrich · ./security · ./status/gitlab-status · ./events
+//   ./prisma · @/lib/run-analysis · ./persist · ./ai/enrich · ./security · ./status/gitlab-status · ./events
 //
 // 两个模块级状态要注意（都是 `let`，跨用例共享）：
 //   started —— 所以每个用例开头必须先 stopScheduler()，否则第二次 start 直接 return
@@ -149,7 +149,7 @@ before(async () => {
     },
   });
 
-  mock.module(abs("../src/worker/run-analysis.ts"), {
+  mock.module(abs("../src/lib/run-analysis.ts"), {
     namedExports: { runAnalysis: fakeRunAnalysis },
   });
   mock.module(abs("../src/lib/persist.ts"), {

@@ -11,7 +11,7 @@ const {
   classifyClassChange,
   containsAny,
   isFunctionLike,
-} = require("../src/worker/rules.cjs");
+} = require("../worker/rules.cjs");
 
 // 辅助构造器
 function fn(params = [], extra = {}) {
