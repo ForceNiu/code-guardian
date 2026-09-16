@@ -7,10 +7,11 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 
-# env
+# env（.env.* 覆盖 .env.local / .env.production / .env.test 等，一律不入库；
+#      模板 .env.example 用 ! 反向豁免 —— 它必须入库，否则新人不知道要配哪些变量）
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
 
 # prisma
 prisma/*.db
