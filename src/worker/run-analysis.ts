@@ -48,7 +48,16 @@ export function runAnalysis(input: WorkerInput): Promise<WorkerOutput> {
       if (settled) return;
       settled = true;
       done();
-      if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+      // 🔴 exit 0 但从未 postMessage = 线程干净退出却没给结果（2026-09-16 写 C4 测试时查出）。
+      // 原实现在这种情况下**既不 resolve 也不 reject** → 返回的 Promise 永不 settle →
+      // scheduler 的 `void processTask(...).finally(() => running--)` 永不执行 →
+      // **并发槽位永久泄漏**，累积到 MAX_CONCURRENT(3) 后调度器彻底不再处理任务。
+      // 比"报错"更坏：没有任何日志、没有任何失败态，进程看着完全正常。
+      reject(
+        code === 0
+          ? new Error("分析未返回结果：Worker 未 postMessage 就退出了（exit 0）")
+          : new Error(`Worker exited with code ${code}`),
+      );
     });
   });
 }

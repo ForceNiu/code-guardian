@@ -96,7 +96,7 @@ code-guardian/
 | `tasks` | 审查任务 | `status` 状态机、`result`(JSON)、**唯一索引 `(repo_id, mr_id, commit_sha)` 防重** |
 | `file_snapshots` | 文件哈希缓存 | `file_path`、`content_hash`(MD5) |
 | `export_symbols` | 导出符号反向索引 | `symbol_name`、`symbol_type`、`importers`(JSON)、索引 `(repo_id, file_path, symbol_name)` |
-| `feedbacks` | 人工反馈 | `action`(adopt/reject/false_positive)、`comment` |
+| `feedbacks` | 人工反馈（**预留**：表已建，当前只有 `api/tasks/[id]` 的 include 读，**无写入 API**） | `action`(adopt/reject/false_positive)、`comment` |
 
 **任务状态机**：`pending → parsing → analyzing → reporting → done / failed`
 
