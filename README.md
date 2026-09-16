@@ -117,7 +117,7 @@ src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks 
 src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型
 src/worker/        Worker 线程（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）
 src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
-tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / 安全门禁 / webhook 适配）
+tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
 scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
 fixtures/          演示用 git 仓库
 docs/              产品文档 · 架构文档 · 前端设计说明 · reports/（历史审查与验证结论）· demo-ai-uncertain/（AI 触发演示快照）
@@ -180,6 +180,8 @@ docs/              产品文档 · 架构文档 · 前端设计说明 · reports
 | 前端视觉设计原则 | [docs/frontend-redesign.md](docs/frontend-redesign.md) |
 | 历史审查结论 | [docs/reports/CODE_REVIEW_REPORT.md](docs/reports/CODE_REVIEW_REPORT.md) |
 | 端到端验证记录 | [docs/reports/E2E-VERIFICATION-2026-09-16.md](docs/reports/E2E-VERIFICATION-2026-09-16.md) |
+| 端到端复跑记录（引擎大改后） | [docs/reports/E2E-RERUN-2026-09-17.md](docs/reports/E2E-RERUN-2026-09-17.md) |
+| 审计待办台账（审计清单的唯一归属地） | [docs/AUDIT-BACKLOG.md](docs/AUDIT-BACKLOG.md) |
 
 ---
 
