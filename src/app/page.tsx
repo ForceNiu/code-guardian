@@ -38,12 +38,16 @@ const STATUS_BADGE: Record<string, string> = {
 
 export default function Home() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  // Hero 三个数字用服务端聚合计数，不用 tasks 窗口 filter ——
+  // 列表窗口是 size=50，任务超 50 条后窗口内计数会小于真实值。
+  const [stats, setStats] = useState({ total: 0, done: 0, failed: 0 });
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     gitUrl: "",
     baseRef: "",
     headRef: "",
     mrId: "",
+    token: "", // 访问口令：对应服务端 MANUAL_TRIGGER_TOKEN（写端点鉴权，见 api/tasks/route.ts）
   });
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -53,6 +57,11 @@ export default function Home() {
       const res = await fetch("/api/tasks?size=50");
       const data = await res.json();
       setTasks(data.tasks ?? []);
+      setStats({
+        total: data.total ?? 0,
+        done: data.done ?? 0,
+        failed: data.failed ?? 0,
+      });
     } catch {
       // 后端未就绪时静默
     } finally {
@@ -75,7 +84,11 @@ export default function Home() {
     try {
       const res = await fetch("/api/tasks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // 写端点鉴权（fail-closed）：服务端未配 MANUAL_TRIGGER_TOKEN 会直接 503
+          "x-manual-trigger-token": form.token,
+        },
         body: JSON.stringify({
           gitUrl: form.gitUrl,
           baseRef: form.baseRef || undefined,
@@ -92,7 +105,8 @@ export default function Home() {
               ? "已存在相同任务（幂等去重），直接跳转"
               : "任务已入队，调度器将自动开始分析",
         });
-        setForm({ gitUrl: "", baseRef: "", headRef: "", mrId: "" });
+        // 口令保留（避免重复输入），只清空业务字段
+        setForm({ gitUrl: "", baseRef: "", headRef: "", mrId: "", token: form.token });
         void load();
       } else {
         setMsg({ ok: false, text: data.error || "提交失败" });
@@ -162,15 +176,15 @@ export default function Home() {
           >
             <div className="rounded-lg border border-border/50 p-4">
               <div className="text-2xl font-semibold tabular-nums">
-                {tasks.length}
+                {stats.total}
              </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                最近任务数
+                任务总数
              </div>
            </div>
             <div className="rounded-lg border border-border/50 p-4">
               <div className="text-2xl font-semibold tabular-nums">
-                {tasks.filter((t) => t.status === "done").length}
+                {stats.done}
              </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 已完成
@@ -178,7 +192,7 @@ export default function Home() {
            </div>
             <div className="rounded-lg border border-border/50 p-4">
               <div className="text-2xl font-semibold tabular-nums">
-                {tasks.filter((t) => t.status === "failed").length}
+                {stats.failed}
              </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 失败
@@ -250,6 +264,22 @@ export default function Home() {
                       setForm({ ...form, mrId: e.target.value })
                     }
                     placeholder="默认 manual"
+                  />
+               </div>
+                {/* 写端点鉴权：服务端比对 MANUAL_TRIGGER_TOKEN（fail-closed，未配置则 503） */}
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    访问口令（写入类接口鉴权，必填）
+                 </label>
+                  <Input
+                    required
+                    type="password"
+                    autoComplete="off"
+                    value={form.token}
+                    onChange={(e) =>
+                      setForm({ ...form, token: e.target.value })
+                    }
+                    placeholder="与服务端 MANUAL_TRIGGER_TOKEN 一致"
                   />
                </div>
              </div>

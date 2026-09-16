@@ -158,7 +158,12 @@ docs/              产品文档 · 架构文档 · 前端设计说明 · reports
 | `DATABASE_URL` | ✅ | 服务起不来（Prisma 连不上库） |
 | `DEEPSEEK_API_KEY` | — | AI 语义引擎跳过，`uncertain` 变更无人补判，报告照出 |
 | `GITLAB_TOKEN` | — | GitLab Commit Status 回写静默跳过，MR 没有红绿灯 |
-| `WEBHOOK_SECRET` | — | ⚠️ **不填 = 完全不校验来源**，任何人可 POST `/api/webhook` 造任务 |
+| `WEBHOOK_SECRET` | — | 🔒 **fail-closed**：不填则该接口返回 503（不再跳过校验），`/api/webhook` 整段不可用 |
+| `MANUAL_TRIGGER_TOKEN` | — | 🔒 **fail-closed**：不填则 `POST /api/tasks` 返回 503，首页「触发分析」需填此口令 |
+
+> 🔴 两个写端点（`POST /api/tasks`、`POST /api/webhook`）自 2026-09-16 起均为**安全默认**：
+> **未配置密钥即拒绝**，而不是「未配置即不校验」。因为分析链路会真调 DeepSeek 产生费用，
+> 敞开等于替别人付账。本地开发也需显式配好这两个变量之一才能提交任务。
 
 完整说明见 `.env.example`。数据库二选一：Neon 云库，或 `docker compose up -d` 起本地 Postgres。
 
@@ -169,6 +174,7 @@ docs/              产品文档 · 架构文档 · 前端设计说明 · reports
 | 想找什么 | 读哪份 |
 | :--- | :--- |
 | 能力全貌 / 环境变量 / 脚本 | 本文件 README.md |
+| 改代码前必读：红线 / 方法论 / 文件地图 | [docs/DEVELOPING.md](docs/DEVELOPING.md) |
 | 架构设计与规则口径 | [docs/architecture.md](docs/architecture.md) |
 | 产品定位与使用场景 | [docs/product.md](docs/product.md) |
 | 前端视觉设计原则 | [docs/frontend-redesign.md](docs/frontend-redesign.md) |

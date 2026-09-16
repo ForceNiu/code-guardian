@@ -35,18 +35,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
 
+  // 🔴 2026-09-16（D5）fail-closed：未配置 secret 时**整段拒绝**。
+  // 旧写法是 `if (secret) { 校验… }` —— 等于「没配 secret 就没有鉴权」，公网部署一旦漏配
+  // WEBHOOK_SECRET，任何人都能 POST 造任务并触发 DeepSeek 调用（真金白银）。
+  // 安全默认必须是「关着」：要开就得显式配好 secret。
+  if (!secret) {
+    return NextResponse.json(
+      { error: "webhook 已禁用：未配置 WEBHOOK_SECRET（fail-closed，请先设置该环境变量）" },
+      { status: 503 },
+    );
+  }
+
   const source = detectEvent(headers);
 
   // ---- 已识别的平台事件：先校验签名，再适配 ----
   if (source) {
-    if (secret) {
-      if (source === "gitlab-mr") {
-        if (headers.get("x-gitlab-token") !== secret) {
-          return NextResponse.json({ error: "invalid webhook token" }, { status: 401 });
-        }
-      } else if (!verifyGitHubSignature(secret, rawBody, headers.get("x-hub-signature-256"))) {
-        return NextResponse.json({ error: "invalid webhook signature" }, { status: 401 });
+    if (source === "gitlab-mr") {
+      if (headers.get("x-gitlab-token") !== secret) {
+        return NextResponse.json({ error: "invalid webhook token" }, { status: 401 });
       }
+    } else if (!verifyGitHubSignature(secret, rawBody, headers.get("x-hub-signature-256"))) {
+      return NextResponse.json({ error: "invalid webhook signature" }, { status: 401 });
     }
 
     const adapted = adaptWebhook(source, rawBody);
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- 无平台事件头：按统一格式向后兼容 ----
-  if (secret && headers.get("x-gitlab-token") !== secret) {
+  if (headers.get("x-gitlab-token") !== secret) {
     return NextResponse.json({ error: "invalid webhook token" }, { status: 401 });
   }
 
