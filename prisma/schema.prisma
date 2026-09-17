@@ -1,4 +1,4 @@
-// AI 代码副作用检测与审查治理平台 · 数据模型（5 张表）
+// AI 代码副作用检测与审查治理平台 · 数据模型（4 张表）
 // 对应需求文档第四章。所有表名/字段名与文档一致。
 
 generator client {
@@ -18,13 +18,6 @@ enum TaskStatus {
   reporting
   done
   failed
-}
-
-// 人工反馈动作
-enum FeedbackAction {
-  adopt
-  reject
-  false_positive
 }
 
 // 表 1：仓库配置
@@ -60,8 +53,7 @@ model Task {
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
 
-  repo      Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
-  feedbacks Feedback[]
+  repo Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
 
   // 防重复入队：同一 MR 同一 commit 只处理一次
   @@unique([repoId, mrId, commitSha])
@@ -100,18 +92,4 @@ model ExportSymbol {
   @@unique([repoId, filePath, symbolName])
   @@index([repoId, symbolName])
   @@map("export_symbols")
-}
-
-// 表 5：人工反馈
-model Feedback {
-  id        String         @id @default(cuid())
-  taskId    String         @map("task_id")
-  filePath  String         @map("file_path")
-  action    FeedbackAction
-  comment   String?
-  createdAt DateTime       @default(now()) @map("created_at")
-
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@map("feedbacks")
 }
