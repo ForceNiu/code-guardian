@@ -10,7 +10,6 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     where: { id },
     include: {
       repo: { select: { name: true, gitUrl: true } },
-      feedbacks: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!task) {

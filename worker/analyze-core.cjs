@@ -478,30 +478,75 @@ function parseJsonc(text) {
 
 /**
  * 从 tsconfig.json 内容构建路径别名表（compilerOptions.paths + baseUrl）。
+ * 支持递归解析 `extends` 链（最多 3 层），子配置覆盖父配置。
  * 只处理 `前缀/*` → `目标/*` 的通配形式；无别名的项目返回空数组。
- * ⚠️ 不处理 `extends`（继承来的 paths 读不到）——大多数项目写在根 tsconfig，够用。
  *
+ * @param {string} tsconfigText  tsconfig.json 文本内容
+ * @param {string} tsconfigDir   tsconfig.json 所在目录（相对仓库根的 posix 路径，或绝对路径）
+ * @param {Object} [options] 可选配置
+ * @param {Function} [options.readFileSync] 自定义文件读取函数（测试用），默认用 node:fs
+ * @param {Set<string>} [visited]  已访问文件路径集，用于循环引用检测（内部使用）
+ * @param {string} [currentFilePath] 当前正在处理的文件路径（内部使用，用于循环检测）
  * @returns {Array<{prefix: string, targetBase: string, baseDir: string}>}
  */
-function buildPathAliases(tsconfigText, tsconfigDir = "") {
+function buildPathAliases(tsconfigText, tsconfigDir = "", options = {}, currentFilePath) {
+  const { readFileSync = require("node:fs").readFileSync } = options;
+  const visited = options._visited || new Set();
+
   if (!tsconfigText) return [];
-  let co;
+
+  // 循环引用保护：基于文件完整路径
+  const tsconfigDirNorm = path.posix.normalize(tsconfigDir || ".");
+  const resolvedCurrentFile = currentFilePath || path.posix.join(tsconfigDirNorm, "tsconfig.json");
+  if (visited.has(resolvedCurrentFile)) return [];
+  visited.add(resolvedCurrentFile);
+
+  let cfg;
   try {
-    co = parseJsonc(tsconfigText).compilerOptions || {};
+    cfg = parseJsonc(tsconfigText);
   } catch {
     return []; // 解析失败就当没有别名，不影响主链路
   }
-  const baseDir = path.posix.normalize(path.posix.join(tsconfigDir || ".", co.baseUrl || "."));
-  const aliases = [];
+
+  const co = cfg.compilerOptions || {};
+  const baseDir = path.posix.normalize(path.posix.join(tsconfigDirNorm, co.baseUrl || "."));
+
+  // 先递归解析父配置（extends）
+  let parentAliases = [];
+  if (cfg.extends) {
+    const extendPath = cfg.extends;
+    // extends 可以是相对路径（相对于当前 tsconfig 目录）或 npm 包名
+    if (typeof extendPath === "string" && !extendPath.startsWith(".")) {
+      // npm 包如 "tsconfig/node20" — 暂不支持，忽略
+    } else if (typeof extendPath === "string") {
+      const parentDir = path.posix.dirname(path.posix.join(tsconfigDirNorm, extendPath));
+      const parentFile = path.posix.basename(extendPath) === extendPath
+        ? path.posix.join(parentDir, "tsconfig.json") // 目录形式 extends: "./base"
+        : path.posix.join(tsconfigDirNorm, extendPath);        // 文件形式 extends: "./base.json"
+      try {
+        const parentText = readFileSync(parentFile, "utf8");
+        parentAliases = buildPathAliases(parentText, parentDir, {
+          readFileSync,
+          _visited: visited,
+        }, parentFile); // 传入父文件的实际路径用于循环检测
+      } catch {
+        // 父配置读不到就当没有，不阻断
+      }
+    }
+  }
+
+  // 合并：父配置在前，子配置在后（子配置覆盖同 prefix + 同 baseDir）
+  const aliases = [...parentAliases];
   for (const [pattern, targets] of Object.entries(co.paths || {})) {
     if (!Array.isArray(targets)) continue;
     for (const t of targets) {
       if (typeof t !== "string") continue;
-      aliases.push({
-        prefix: pattern.endsWith("/*") ? pattern.slice(0, -1) : pattern, // "@/"
-        targetBase: t.endsWith("/*") ? t.slice(0, -1) : t, // "./src/"
-        baseDir,
-      });
+      const prefix = pattern.endsWith("/*") ? pattern.slice(0, -1) : pattern;
+      const targetBase = t.endsWith("/*") ? t.slice(0, -1) : t;
+      // 子配置覆盖：移除同 prefix 且同 baseDir 的父配置项
+      const idx = aliases.findIndex((a) => a.prefix === prefix && a.baseDir === baseDir);
+      if (idx >= 0) aliases.splice(idx, 1);
+      aliases.push({ prefix, targetBase, baseDir });
     }
   }
   return aliases;
