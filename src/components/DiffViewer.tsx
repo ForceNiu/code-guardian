@@ -1,17 +1,11 @@
 "use client";
 
 // M4 Monaco Diff：变更文件的 base/head 两侧对比视图。
-// 用 @monaco-editor/react（默认 CDN loader，固定版本），next/dynamic 懒加载避免首屏拖慢。
+// 用 @monaco-editor/react + monaco-editor-webpack-plugin 本地打包，零 CDN 依赖。
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import { loader } from "@monaco-editor/react";
 import type { FileDiff } from "@/lib/types";
-
-// 固定 CDN 版本，避免默认 loader 版本漂移（生产依赖 jsdelivr CDN，已验证可达）
-loader.config({
-  paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs" },
-});
 
 // Monaco 是重组件，ssr:false + 按需加载，降低首屏成本
 const DiffEditor = dynamic(

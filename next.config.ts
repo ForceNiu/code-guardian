@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import MonacoWebpackPlugin from "monaco-editor-webpack-plugin";
 
 const nextConfig: NextConfig = {
   // Prisma 与 Babel 在运行时按 node 原生模块加载，禁止打包进 server bundle
@@ -13,6 +14,30 @@ const nextConfig: NextConfig = {
   // 显式指定根即可同时消除这两点。
   turbopack: { root: __dirname },
   outputFileTracingRoot: __dirname,
+
+  // Monaco Editor 本地打包（2026-09-17）：消除 CDN 依赖，私有化部署合规
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.plugins.push(
+        new MonacoWebpackPlugin({
+          languages: [
+            "typescript",
+            "javascript",
+            "json",
+            "css",
+            "scss",
+            "less",
+            "html",
+            "markdown",
+            "yaml",
+            "python",
+          ],
+          filename: "static/monaco/[name].worker.js",
+        })
+      );
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
