@@ -109,7 +109,7 @@
 | :--- | :--- |
 | 确定性规则 | 25 条查表（函数签名 10 类 / type/interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类）+ `unknown` 兜底 |
 | AI 语义引擎 | LangGraph 4 节点管线（重述→检索→预测→建议），DeepSeek |
-| 单元测试 | 103 个，全绿 |
+| 单元测试 | 238 个，全绿（`npm test` 实测；**此数随开发增长，用前复测**） |
 | CI 门禁 | `lint → typecheck → test → build` 四道，全绿 |
 | 依赖 CVE 数据源 | npm Bulk Advisory（完整依赖树，含传递依赖） |
 | 体积门禁阈值 | 累计 unpackedSize 100MB |
@@ -124,7 +124,7 @@
 | :--- | :--- | :--- |
 | M1 骨架 | Prisma 建表 + Webhook 幂等防重 + 任务入队 | ✅ 已实现 |
 | M2 Worker 核心 | git + AST + 导出符号 + 哈希缓存 + 影响链路 | ✅ 已实现 |
-| M3 规则引擎 | 27 条确定性规则 + LangGraph 双轨 | ✅ 已实现 |
+| M3 规则引擎 | 25 条查表规则（`RULE_TABLE`，另含 `unknown` 兜底）+ LangGraph 双轨 | ✅ 已实现 |
 | M4 前端联调 | SSE 实时进度 + Monaco Diff + 任意 head | ✅ 已实现 |
 | M5 安全门禁 | CVE 扫描 + 体积门禁 + GitLab 状态回写 | ✅ 已实现 |
 | 未来（可选） | 部署上线（Vercel + Neon）、真实 GitLab 集成验证、规则扩容、演示录屏 | ⏳ 规划中 |
