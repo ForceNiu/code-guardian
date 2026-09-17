@@ -757,6 +757,95 @@ test("resolveImportWithAlias 尊重 baseUrl 子目录", () => {
   assert.equal(resolveImportWithAlias("~/lib/a", "src/app/page.tsx", allFiles, aliases), "src/lib/a.ts");
 });
 
+// buildPathAliases extends 支持（2026-09-17）
+test("buildPathAliases 单层 extends 合并 paths（子配置覆盖父配置）", () => {
+  const child = '{ "extends": "./base.json", "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }';
+  const parent = '{ "compilerOptions": { "baseUrl": ".", "paths": { "~/*": ["./lib/*"] } } }';
+  // 使用 readFileSync 选项注入父配置
+  const aliases = buildPathAliases(child, "", {
+    readFileSync: (p) => {
+      if (p === "base.json") return parent;
+      throw new Error("unexpected read: " + p);
+    },
+  });
+  assert.equal(aliases.length, 2);
+  // 父配置 ~/* 在前，子配置 @/* 在后
+  assert.equal(aliases[0].prefix, "~/");
+  assert.equal(aliases[0].targetBase, "./lib/");
+  assert.equal(aliases[1].prefix, "@/");
+  assert.equal(aliases[1].targetBase, "./src/");
+});
+
+test("buildPathAliases 多层 extends（3 层）", () => {
+  // 3层链：level3(packages/app) -> level2(packages/app/tsconfig.root.json) -> level1(packages/tsconfig.base.json)
+  const level3 = '{ "extends": "./tsconfig.root.json", "compilerOptions": { "baseUrl": ".", "paths": { "#/*": ["./src/*"] } } }';
+  const level2 = '{ "extends": "../tsconfig.base.json", "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./lib/*"] } } }';
+  const level1 = '{ "compilerOptions": { "baseUrl": ".", "paths": { "~/*": ["./common/*"] } } }';
+  const aliases = buildPathAliases(level3, "packages/app", {
+    readFileSync: (p) => {
+      if (p === "packages/app/tsconfig.root.json") return level2;
+      if (p === "packages/tsconfig.base.json") return level1;
+      throw new Error("unexpected read: " + p);
+    },
+  });
+  assert.equal(aliases.length, 3);
+  // 顺序：level1(~/), level2(@/), level3(#/)
+  assert.equal(aliases[0].prefix, "~/");
+  assert.equal(aliases[1].prefix, "@/");
+  assert.equal(aliases[2].prefix, "#/");
+});
+
+test("buildPathAliases 子配置同 prefix 覆盖父配置", () => {
+  const child = '{ "extends": "./base.json", "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./override/*"] } } }';
+  const parent = '{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./original/*"] } } }';
+  const aliases = buildPathAliases(child, "", {
+    readFileSync: (p) => {
+      if (p === "base.json") return parent;
+      throw new Error("unexpected read: " + p);
+    },
+  });
+  // 只保留子配置的 @/*（覆盖了父配置）
+  const atAliases = aliases.filter((a) => a.prefix === "@/");
+  assert.equal(atAliases.length, 1);
+  assert.equal(atAliases[0].targetBase, "./override/");
+});
+
+test("buildPathAliases 循环 extends 不死循环（返回所有已成功处理层级的 paths，不阻断）", () => {
+  const a = '{ "extends": "./b.json", "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./a/*"] } } }';
+  const b = '{ "extends": "./a.json", "compilerOptions": { "baseUrl": ".", "paths": { "~/*": ["./b/*"] } } }';
+  const aliases = buildPathAliases(a, "", {
+    readFileSync: (p) => {
+      if (p === "b.json") return b;
+      if (p === "a.json") return a;
+      throw new Error("unexpected read: " + p);
+    },
+  });
+  // 循环检测只中断无限递归，已成功处理的层级（b.json 的 ~/* + a.json 的 @/*）都应保留
+  assert.equal(aliases.length, 2);
+  const atAliases = aliases.filter((x) => x.prefix === "@/");
+  const tildeAliases = aliases.filter((x) => x.prefix === "~/");
+  assert.equal(atAliases.length, 1);
+  assert.equal(atAliases[0].targetBase, "./a/");
+  assert.equal(tildeAliases.length, 1);
+  assert.equal(tildeAliases[0].targetBase, "./b/");
+});
+
+test("buildPathAliases npm 包 extends 忽略不报错", () => {
+  const child = '{ "extends": "tsconfig/node20", "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }';
+  const aliases = buildPathAliases(child, "");
+  assert.equal(aliases.length, 1);
+  assert.equal(aliases[0].prefix, "@/");
+});
+
+test("buildPathAliases 父配置读取失败不阻断", () => {
+  const child = '{ "extends": "./nonexistent.json", "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } } }';
+  const aliases = buildPathAliases(child, "", {
+    readFileSync: () => { throw new Error("ENOENT"); },
+  });
+  assert.equal(aliases.length, 1);
+  assert.equal(aliases[0].prefix, "@/");
+});
+
 // ---------------------------------------------------------------------------
 // default 导出 / const 箭头函数导出的签名盲区修复（2026-09-15）
 // 修复前：这两类导出的 signature() 恒等于类型名（"default" / "variable"），
