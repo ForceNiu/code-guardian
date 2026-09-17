@@ -144,7 +144,7 @@ Webhook / 手动触发
 | :--- | :--- | :--- |
 | **M1 骨架** | Prisma 建表 + Webhook 防重 + 任务入队 | ✅ 已实现 |
 | **M2 Worker 核心** | git + AST + 导出符号 + 缓存 + 影响链路 | ✅ 已实现（增量缓存命中跳过重解析） |
-| M3 规则引擎 | 27 条 AST 硬规则 + LangGraph 双轨 | ✅ 已实现（确定性规则引擎 + AI 语义引擎） |
+| M3 规则引擎 | 25 条查表规则（`RULE_TABLE`，另含 `unknown` 兜底）+ LangGraph 双轨 | ✅ 已实现（确定性规则引擎 + AI 语义引擎） |
 | M4 前端联调 | SSE 实时进度 + Monaco Diff + 任意 head | ✅ 已实现（跳过 AntD，自研轻量 UI） |
 | M5 安全门禁 | CVE 扫描 + 构建体积检测 + GitLab 状态回写 | ✅ 已实现（CVE + 体积 + GitLab Commit Status 回写） |
 
