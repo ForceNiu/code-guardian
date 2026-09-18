@@ -37,6 +37,9 @@
 > 得到**初始 `uncertain 7 / proven 2`**；而该 JSON 最终**正好 7 条带 `suggestion`** —— 完全吻合。
 > 但它的最终 `confidence` 分布显示的是 `uncertain 3 / heuristic 3 / proven 3`（AI 判定后的值）。
 > **结论：只看最终分布会误判成「AI 只处理了 3 条」，实际处理了 7 条。**
+>
+> 📌 **数据来源已于 2026-09-18 移出本仓库**（`docs/demo-ai-uncertain/` 整体迁至仓库外，见 `docs/AUDIT-BACKLOG.md` §二.17）——
+> 本节的**结论与数字不受影响**（当时实测），但**无法再按原路径复现**；复现请用同期 `e2e-logs/` 或其归档位置。
 
 **反推手段**（日志意外丢失时用）：即使只剩落库的 `changedSymbols`，也能重放规则引擎算出「初始 uncertain 数」作为参照：
 

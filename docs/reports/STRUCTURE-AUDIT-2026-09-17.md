@@ -37,7 +37,7 @@
    |---|---|
    | `worker/analyze.worker.cjs` | 只被 `path.join(process.cwd(), "worker", …)` 这类**运行时字符串**加载（`docs/DEVELOPING.md` 文件地图已标注） |
    | `scripts/scan-repo.cjs` | 由 `package.json` 的 `"scan"` script 拉起 |
-   | `docs/demo-ai-uncertain/build-report.mjs` | 文件头自带用法注释，手动执行 |
+   | `docs/demo-ai-uncertain/build-report.mjs` | 文件头自带用法注释，手动执行（📌 该目录 **2026-09-18 已整体移出本仓库**，见 `docs/AUDIT-BACKLOG.md` §二.17；本行是审计**当时**的记录） |
 
    → **0 个真死文件。**
 

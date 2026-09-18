@@ -32,8 +32,7 @@ ESLint 查不出变量污染、Code Review 人工太慢。本平台在 MR 合并
 │   └─────────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Prisma + PostgreSQL（Neon）                  │
-│    repositories · tasks · file_snapshots · export_symbols ·     │
-│    feedbacks                                                    │
+│    repositories · tasks · file_snapshots · export_symbols       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -44,7 +43,7 @@ ESLint 查不出变量污染、Code Review 人工太慢。本平台在 MR 合并
 ```
 code-guardian/
 ├── prisma/
-│   ├── schema.prisma          # 5 张表（见 §4）
+│   ├── schema.prisma          # 4 张表（见 §4）
 │   └── seed.ts                # 幂等 seed：建仓库 + 示例任务
 ├── src/
 │   ├── app/
@@ -88,7 +87,7 @@ code-guardian/
 
 ---
 
-## 4. 数据模型（5 张表）
+## 4. 数据模型（4 张表）
 
 | 表 | 职责 | 关键字段 |
 | :--- | :--- | :--- |
@@ -96,7 +95,10 @@ code-guardian/
 | `tasks` | 审查任务 | `status` 状态机、`result`(JSON)、**唯一索引 `(repo_id, mr_id, commit_sha)` 防重** |
 | `file_snapshots` | 文件哈希缓存 | `file_path`、`content_hash`(MD5) |
 | `export_symbols` | 导出符号反向索引 | `symbol_name`、`symbol_type`、`importers`(JSON)、索引 `(repo_id, file_path, symbol_name)` |
-| `feedbacks` | 人工反馈（**预留**：表已建，当前只有 `api/tasks/[id]` 的 include 读，**无写入 API**） | `action`(adopt/reject/false_positive)、`comment` |
+
+> ⚠️ **`feedbacks` 表已于 PR #23（2026-09-17）删除** —— 迁移 `prisma/migrations/20260917054609_remove_feedback/migration.sql`
+> 明写 `DROP TABLE "feedbacks"`。该表此前长期是「预留」状态（只有读、无写入 API），最终按台账 `P2③` 的收口方向处理。
+> **用前复测**：`git grep -n "^model " prisma/schema.prisma` —— 以 `schema.prisma` 为准，不要相信任何写死的表数量。
 
 **任务状态机**：`pending → parsing → analyzing → reporting → done / failed`
 

@@ -7,6 +7,14 @@
 >
 > **状态**：✅ 完成。五批（A 机械扫描 / B 活文档 / C 历史报告 / D 代码 / E 配置）全部跑完。
 > **全程只读** —— 未修改任何被审文件。
+>
+> ⚠️ **勘误（2026-09-18 追加）**——§1「全过项」表里有一处**在本报告时刻成立、其后被代码改动推翻**的判定：
+> - **「prisma 模型数 `5 张表` ✅（含 Feedback）」（第 39 行）→ 现为 4 张表。** 时间线：本报告随 PR `#22`（`c1c6185`，09-17 12:08）入库时判定正确；
+>   两小时后 PR `#23`（`f61a367`，09-17 14:07）的迁移 `20260917054609_remove_feedback` 执行了 `DROP TABLE "feedbacks"`。
+>   → 该判定**不是审计漏错**，属「后发改动让结论过期」；正文按历史报告只读原则**不作修改**，仅在此标注。
+> - **核表数量的权威源只有一个：`prisma/schema.prisma` 的 `model` 列表**（用前复测：`git grep -n "^model " prisma/schema.prisma`）。
+>   ⚠️ 不要拿 `prisma/migrations/` 判断——它同时保留了 `CREATE TABLE "feedbacks"`（init）与 `DROP TABLE "feedbacks"`（remove_feedback），按关键词 grep 会得出自相矛盾的结论。
+> - 对应台账条目：`docs/AUDIT-BACKLOG.md` §一 第八批 **U1**（`architecture.md` 已修为 4 张表）、§二.11 **U2**（本 banner）。
 
 ---
 
