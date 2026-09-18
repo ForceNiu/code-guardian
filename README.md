@@ -152,7 +152,7 @@ npm run start              # 默认监听 3000
 ## 目录结构
 
 ```
-prisma/            schema（5 张表）+ 迁移 + seed
+prisma/            schema（4 张表）+ 迁移 + seed
 src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
 src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
 worker/            Worker 线程侧引擎（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）—— **有意放在 `src/` 之外**：不进 Next bundle、不参与 tsc
@@ -160,7 +160,7 @@ src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Dif
 tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
 scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
 fixtures/          演示用 git 仓库
-docs/              产品文档 · 架构文档 · 前端设计说明 · reports/（历史审查与验证结论）· demo-ai-uncertain/（AI 触发演示快照）
+docs/              产品文档 · 架构文档 · 前端设计说明 · reports/（历史审查与验证结论）
 .github/           CI（lint → typecheck → test → build 四道门禁，单 job）
 ```
 
