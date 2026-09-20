@@ -1,80 +1,86 @@
 # Code Guardian · AI 代码副作用检测与审查治理平台
 
-在 MR 合并前自动分析 **「这次改动影响了哪些函数、哪些文件」**，作为合并门禁依据。
-ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **AST 增量分析 + 反向索引** 把影响链路自动算出来。
+改了一个函数的返回值，谁会被影响？
+
+ESLint 答不上来——它只看语法，不看「谁引用了这个符号」。让 review 的人去翻 diff 又太慢，
+几百行的 MR 里真正危险的那一行往往夹在中间，而**漏掉一个引用方**的代价要等到线上才发现。
+
+这个平台把这件事做成确定性的产物：粘一个仓库地址，它跑通 diff → AST 分析 → 导出符号提取 →
+反向索引追踪，输出一条 **「改动文件 → 导出符号 → 变更类型 → 引用方」** 的完整影响链路，
+每条变更带风险定级，可直接拿来当 **MR 合并门禁**的判据。
+
+![首页](docs/screenshots/landing.png)
+
+填仓库地址与 base / head 两个 ref 就能跑。每次分析都留在下面的列表里，可随时回看。
 
 > 当前进度：**M1（骨架）→ M5（安全门禁）已全部完成并合并**。M5 覆盖 CVE 依赖漏洞扫描 + 构建体积门禁 + GitLab 状态回写。详见 [架构文档](docs/architecture.md) 里程碑部分。
 
 ---
 
-## 核心能力（已实现）
+## 报告里有什么
 
-| 能力 | 说明 | 解决什么问题 |
-| :--- | :--- | :--- |
-| 多源 Webhook | `POST /api/webhook` 幂等入队，适配 GitLab MR / GitHub push / GitHub PR，唯一索引防重 | 不用改现有 CI；同一 MR 重复触发**不会重复烧 AI 的钱** |
-| 手动触发 | 首页粘贴仓库地址 + base/head ref 即可分析 | 还没接 webhook 也能先看到效果 |
-| AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里 | 分析大仓库时不卡住接口 |
-| 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 | 想比哪两个提交就比哪两个，不受「当前分支」限制 |
-| 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」 | 回答**「改这个函数会影响谁」**——ESLint 不回答的问题 |
-| 确定性规则引擎 | 25 条查表规则 + `unknown` 兜底（函数签名 10 类 / type·interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类）＋ semver 判据、confidence 三档 | **绝大多数变更由规则判定**（真实仓库实测 0 `uncertain`）、模糊的才送 AI：结论可复现、成本可控 |
-| AI 语义引擎 | 规则判为 `uncertain` 的变更送 LangGraph 4 节点（DeepSeek）补判定，失败静默降级 | 规则兜不住的那部分才送 AI；**AI 挂了也不阻塞出报告** |
-| 影响链路 | 对比 base/head 导出签名，输出「文件 → 符号 → 变更类型 → 影响文件」 | 直接拿来当**合并门禁的判据**，不用人再读一遍 diff |
-| 任务调度 | 数据库状态机 + 5s 轮询 + 信号量限 3 并发，无 Redis/队列 | 单机就能跑，不引入额外中间件 |
-| 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 | 长任务不假死，用户知道现在到哪一步 |
-| Monaco Diff | 新旧文件左右对比，高亮副作用行 | 从「有影响」落到「影响了哪一行」 |
-| 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 | 二次分析只算变更文件，不重扫全仓 |
-| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值）+ GitLab Commit Status 回写 | 不只查代码本身，还查**依赖带来的漏洞与体积** |
+一次分析跑完，报告页从上到下是这么组织的。
 
-### 能力落在哪个文件
+### 五阶段流水线，每一步都看得见
 
-| 能力 | 代码位置 |
-| :--- | :--- |
-| 分析流水线总控 | `src/lib/run-analysis.ts`（主线程） → `worker/analyze.worker.cjs`（Worker 线程） |
-| AST 解析 / 符号 / 差异 / 影响图 | `worker/analyze-core.cjs` |
-| 25 条规则 + 定级 | `worker/rules.cjs` |
-| 任务调度（轮询/限并发/超时） | `src/lib/scheduler.ts` |
-| 结果落库 / 增量缓存 | `src/lib/persist.ts` |
-| SSE 事件总线 | `src/lib/events.ts` |
-| Webhook 适配（三种源） | `src/lib/webhook-adapters.ts` |
-| AI 语义引擎 | `src/lib/ai/`（`semantic-graph.ts` 4 节点 + `deepseek.ts`） |
-| 安全门禁 | `src/lib/security/` + `src/lib/status/gitlab-status.ts` |
-| 前端报告页 | `src/app/tasks/[id]/page.tsx` + `src/components/` |
+![报告头部](docs/screenshots/report-header.png)
 
-### 关键阈值（改了要重新验证）
+入队 → 拉取解析 → AST 分析 → 生成报告 → 完成，五个阶段实时推送（SSE）。
+长任务最容易让人误判成「卡死了」，所以进度是显式的；断线会自动降级成轮询，不需要手动刷新。
 
-| 参数 | 值 | 位置 |
-| :--- | :--- | :--- |
-| 并发上限 | 3 | `scheduler.ts` |
-| 轮询间隔 | 5s | `scheduler.ts` |
-| 任务硬超时 | 5 min | `scheduler.ts` |
-| Worker 软超时 | 4 min（必须短于硬超时） | `run-analysis.ts` |
-| git 操作超时 | 2 min | `analyze.worker.cjs` |
-| DeepSeek 超时 | 5 min | `ai/deepseek.ts` |
-| 依赖体积门禁 | 100 MB | `security/bundle-size.ts` |
-| 影响面升档阈值 | 引用 ≥5 且非 proven | `rules.cjs` |
+### 先给风险，再给链路
+
+![风险总览](docs/screenshots/risk-overview.png)
+
+高危 / 中危 / 低危三档一眼看清，下面是全仓规模（文件数与导出符号数）和本次变更的规模。
+定级不靠 AI 猜——25 条查表规则先判，能算准的直接出结论。
+
+### 核心：改了谁，谁受影响
+
+![影响链路](docs/screenshots/impact-chain.png)
+
+这是整个项目的卖点。每行是一条变更：改动文件 → 导出符号 → 变更类型 → 风险 → 置信度 → **影响文件（引用方）**。
+表上方那行统计说明了分工：**规则引擎 2 条、AI 语义引擎 7 条**——能由规则确定的绝不上 AI。
+
+> 边界要写清楚：工具判断的是「对外接口（导出签名）」有没有变。函数体内部的实现改动不会产生任何条目——
+> 哪怕行为已经变了。所以「影响链路 0 条」**不等于**「这个改动没有影响」。
+
+### AI 只在规则判不了的时候出手
+
+![AI 语义判定明细](docs/screenshots/ai-semantic.png)
+
+规则判为 `uncertain` 的变更才送 DeepSeek，走 LangGraph 四节点（问题重述 → 上下文检索 → 影响面预测 → 修复建议）。
+真实仓库实测里绝大多数变更由规则定级，AI 是兜底通道——**AI 挂了也不阻塞出报告**。
+
+### 连依赖一起体检
+
+![安全门禁](docs/screenshots/security-gate.png)
+
+CVE 漏洞扫描（npm 官方漏洞库）+ 依赖体积门禁（unpackedSize 累计，阈值 100MB）。
+这一块是**全仓依赖体检**，与本次改动是否越过依赖无关——每条漏洞都来自当前依赖树里真实存在的包，
+并标注「中招版本」区间，方便判断该不该升。
+
+### 从签名一直落到代码行
+
+![变更符号明细](docs/screenshots/changed-symbols.png)
+
+`function(number, number): string` 变成 `variable`，这类签名变化单独列表——它是影响面判断的原始依据。
+
+![代码 Diff](docs/screenshots/diff-view.png)
+
+最后是 Monaco 左右对比，红绿高亮改动行。从「有影响」落到「影响了哪一行」。
 
 ---
 
-## 技术栈
+## 文档
 
-版本取自 `package.json` 的实际声明（`^` 为语义化范围内的最低版本）。运行环境：**Node 22**（CI 与本地一致）。
-
-| 技术 | 版本 | 作用 |
-| :--- | :--- | :--- |
-| Next.js | `^16.3.4` | 页面与 API 路由（App Router） |
-| React / React DOM | `^19.2.8` | 报告页与组件 |
-| TypeScript | `^5.9.3` | strict 全量类型（CI 第二道门禁） |
-| Prisma / Prisma Client | `^6.19.3` | ORM、迁移、增量缓存落库 |
-| PostgreSQL | 本地用 `postgres:16-alpine`；线上 Neon 云库 | 任务、文件快照、导出符号反向索引 |
-| Tailwind CSS | `^4.3.3` | 样式（v4，无 `tailwind.config.js`） |
-| @babel/parser / @babel/traverse | `^7.29.8` | AST 解析与遍历（分析引擎的核心） |
-| @langchain/langgraph | `^1.4.13` | AI 语义引擎 4 节点管线 |
-| @langchain/core | `^1.2.9` | LangGraph 的运行时依赖 |
-| DeepSeek | HTTP 直发（无 SDK） | 语义判定；`node:https`/`node:http` 直连，**配了 `HTTPS_PROXY` 则改走 CONNECT 隧道**（undici 不读代理变量，在代理环境会挂死），无代理时直连兜底 |
-| @monaco-editor/react | `^4.7.0` | 新旧文件 Diff 对比 |
-| zod | `^3.25.76` | Webhook 与手动触发入参校验 |
-| node:worker_threads | Node 22 内置 | CPU 密集分析隔离在主线程之外 |
-| @phosphor-icons/react / framer-motion | `^2.1.10` / `^13.2.0` | 图标与动效（前端视觉层） |
+| 想找什么 | 读哪份 |
+|---|---|
+| **改代码前必读**：工程红线 / 测试教训 / 沙箱坑 / 文件地图 | [docs/DEVELOPING.md](docs/DEVELOPING.md) |
+| 架构设计、里程碑、数据模型 | [docs/architecture.md](docs/architecture.md) |
+| 产品定位、使用场景、§10 已知边界 | [docs/product.md](docs/product.md) |
+| 审计待办台账（审计清单的唯一归属地） | [docs/AUDIT-BACKLOG.md](docs/AUDIT-BACKLOG.md) |
+| 历史审查 / 全链路复跑报告（2026-09-16 ~ 09-19） | **已移出本仓库**，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/` |
 
 ---
 
@@ -109,7 +115,7 @@ npm run dev
 
 ## 快速验证 Webhook 幂等
 
-> ⚠️ `POST /api/webhook` 是**写端点且 fail-closed**（见下方「环境变量」）：**不配 `WEBHOOK_SECRET` 直接 503**，
+> `POST /api/webhook` 是**写端点且 fail-closed**（见下方「环境变量」）：**不配 `WEBHOOK_SECRET` 直接 503**，
 > 配了但**不带 `x-gitlab-token` 头**则 **401**。所以下面的 `-H "x-gitlab-token: …"` **不能省**——
 > 无平台事件头时走的是「统一格式」兼容路径，该路径**同样校验这个 token**（`src/app/api/webhook/route.ts:79`）。
 
@@ -130,62 +136,81 @@ curl -X POST http://localhost:3000/api/webhook \
 
 ---
 
-## 部署
+## 核心能力（已实现）
 
-生产运行 = 一个 Next.js 服务器 + 一个 Postgres。**单实例部署下不需要 Redis、消息队列或额外的 worker 进程**——
-调度器随 `instrumentation.ts` 在应用启动时自动拉起（5s 轮询，并发上限 3），分析跑在进程内的 `worker_threads` 里。
+| 能力 | 说明 | 解决什么问题 |
+|---|---|---|
+| 多源 Webhook | `POST /api/webhook` 幂等入队，适配 GitLab MR / GitHub push / GitHub PR，唯一索引防重 | 不用改现有 CI；同一 MR 重复触发**不会重复烧 AI 的钱** |
+| 手动触发 | 首页粘贴仓库地址 + base/head ref 即可分析 | 还没接 webhook 也能先看到效果 |
+| AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里 | 分析大仓库时不卡住接口 |
+| 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 | 想比哪两个提交就比哪两个，不受「当前分支」限制 |
+| 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」 | 回答**「改这个函数会影响谁」**——ESLint 不回答的问题 |
+| 确定性规则引擎 | 25 条查表规则 + `unknown` 兜底（函数签名 10 类 / type·interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类）＋ semver 判据、confidence 三档 | **绝大多数变更由规则判定**（真实仓库实测 0 `uncertain`）、模糊的才送 AI：结论可复现、成本可控 |
+| AI 语义引擎 | 规则判为 `uncertain` 的变更送 LangGraph 4 节点（DeepSeek）补判定，失败静默降级 | 规则兜不住的那部分才送 AI；**AI 挂了也不阻塞出报告** |
+| 影响链路 | 对比 base/head 导出签名，输出「文件 → 符号 → 变更类型 → 影响文件」 | 直接拿来当**合并门禁的判据**，不用人再读一遍 diff |
+| 任务调度 | 数据库状态机 + 5s 轮询 + 信号量限 3 并发，无 Redis/队列 | 单机就能跑，不引入额外中间件 |
+| 实时进度 | SSE（`text/event-stream`）推送解析/分析各阶段状态，断线自动降级轮询 | 长任务不假死，用户知道现在到哪一步 |
+| Monaco Diff | 新旧文件左右对比，高亮副作用行 | 从「有影响」落到「影响了哪一行」 |
+| 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 | 二次分析只算变更文件，不重扫全仓 |
+| 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值）+ GitLab Commit Status 回写 | 不只查代码本身，还查**依赖带来的漏洞与体积** |
 
-> ⚠️ 上句的「**单实例**」是硬前提：SSE 进度推送走的是**进程内**事件总线（`src/lib/events.ts`，EventEmitter 挂 `globalThis`）。
-> 横向扩到**多实例 / Serverless** 后，跨实例订阅失效——浏览器可能一直收不到进度更新（任务本身仍会跑完，可刷新看结果），
-> 届时需把它换成 Redis pub/sub。这是已知边界，登记见 `docs/AUDIT-BACKLOG.md`（D11）。
+### 能力落在哪个文件
 
-```bash
-npm ci
-npx prisma generate      # 项目无 postinstall，必须手动跑一次（CI 也是显式一步）
-npx prisma migrate deploy  # 只应用已有迁移，不生成新迁移
-npm run build
-npm run start              # 默认监听 3000
-```
+| 能力 | 代码位置 |
+|---|---|
+| 分析流水线总控 | `src/lib/run-analysis.ts`（主线程） → `worker/analyze.worker.cjs`（Worker 线程） |
+| AST 解析 / 符号 / 差异 / 影响图 | `worker/analyze-core.cjs` |
+| 25 条规则 + 定级 | `worker/rules.cjs` |
+| 任务调度（轮询/限并发/超时） | `src/lib/scheduler.ts` |
+| 结果落库 / 增量缓存 | `src/lib/persist.ts` |
+| SSE 事件总线 | `src/lib/events.ts` |
+| Webhook 适配（三种源） | `src/lib/webhook-adapters.ts` |
+| AI 语义引擎 | `src/lib/ai/`（`semantic-graph.ts` 4 节点 + `deepseek.ts`） |
+| 安全门禁 | `src/lib/security/` + `src/lib/status/gitlab-status.ts` |
+| 前端报告页 | `src/app/tasks/[id]/page.tsx` + `src/components/` |
 
-> 🔴 **上生产前必须先配好两个写端点的口令**（`MANUAL_TRIGGER_TOKEN` / `WEBHOOK_SECRET`）。
-> 它们是 **fail-closed** 的——不配就返回 503，对应功能整段不可用。见下方「环境变量」。
+### 关键阈值（改了要重新验证）
 
-| 项 | 值 | 说明 |
-| :--- | :--- | :--- |
-| 应用端口 | `3000` | `npm run start` 的默认端口 |
-| 数据库 | Neon 云库，或本地 Docker | 本地：`npm run db:up` / `db:down` → `postgres:16-alpine`，映射宿主机 `5432`，数据卷 `pgdata`，带 `pg_isready` 健康检查 |
-| 迁移（开发） | `npm run prisma:migrate` | 会**生成**新迁移文件 |
-| 迁移（生产） | `npm run prisma:deploy` | **只应用**已有迁移 |
-| 查库 | `npm run prisma:studio` | 可视化查看任务、快照与符号索引 |
-| CI | `.github/workflows/ci.yml` | 单 job，Node 22，依次 `lint → typecheck → test → build`，超时 15 min；push 到 `main` 与所有 PR 都触发 |
-
-> 📌 本仓库**没有绑定任何托管平台的自动部署**：合并到 `main` 不会触发线上发布，部署方式由你自己选。
+| 参数 | 值 | 位置 |
+|---|---|---|
+| 并发上限 | 3 | `scheduler.ts` |
+| 轮询间隔 | 5s | `scheduler.ts` |
+| 任务硬超时 | 5 min | `scheduler.ts` |
+| Worker 软超时 | 4 min（必须短于硬超时） | `run-analysis.ts` |
+| git 操作超时 | 2 min | `analyze.worker.cjs` |
+| DeepSeek 超时 | 5 min | `ai/deepseek.ts` |
+| 依赖体积门禁 | 100 MB | `security/bundle-size.ts` |
+| 影响面升档阈值 | 引用 ≥5 且非 proven | `rules.cjs` |
 
 ---
 
-## 目录结构
+## 技术栈
 
-```
-prisma/            schema（4 张表）+ 迁移 + seed
-src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
-src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
-worker/            Worker 线程侧引擎（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）—— **有意放在 `src/` 之外**：不进 Next bundle、不参与 tsc
-src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
-tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
-scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
-fixtures/          演示用 git 仓库
-docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发须知(DEVELOPING: 红线/方法论/文件地图) · 审计台账(AUDIT-BACKLOG)；历史报告已移出本仓库
-.github/           CI（lint → typecheck → test → build 四道门禁，单 job）
-```
+版本取自 `package.json` 的实际声明（`^` 为语义化范围内的最低版本）。运行环境：**Node 22**（CI 与本地一致）。
 
-详见 [产品文档](docs/product.md) 与 [架构文档](docs/architecture.md)。
+| 技术 | 版本 | 作用 |
+|---|---|---|
+| Next.js | `^16.3.4` | 页面与 API 路由（App Router） |
+| React / React DOM | `^19.2.8` | 报告页与组件 |
+| TypeScript | `^5.9.3` | strict 全量类型（CI 第二道门禁） |
+| Prisma / Prisma Client | `^6.19.3` | ORM、迁移、增量缓存落库 |
+| PostgreSQL | 本地用 `postgres:16-alpine`；线上 Neon 云库 | 任务、文件快照、导出符号反向索引 |
+| Tailwind CSS | `^4.3.3` | 样式（v4，无 `tailwind.config.js`） |
+| @babel/parser / @babel/traverse | `^7.29.8` | AST 解析与遍历（分析引擎的核心） |
+| @langchain/langgraph | `^1.4.13` | AI 语义引擎 4 节点管线 |
+| @langchain/core | `^1.2.9` | LangGraph 的运行时依赖 |
+| DeepSeek | HTTP 直发（无 SDK） | 语义判定；`node:https`/`node:http` 直连，**配了 `HTTPS_PROXY` 则改走 CONNECT 隧道**（undici 不读代理变量，在代理环境会挂死），无代理时直连兜底 |
+| @monaco-editor/react | `^4.7.0` | 新旧文件 Diff 对比 |
+| zod | `^3.25.76` | Webhook 与手动触发入参校验 |
+| node:worker_threads | Node 22 内置 | CPU 密集分析隔离在主线程之外 |
+| @phosphor-icons/react / framer-motion | `^2.1.10` / `^13.2.0` | 图标与动效（前端视觉层） |
 
 ---
 
 ## 脚本
 
 | 命令 | 作用 |
-| :--- | :--- |
+|---|---|
 | `npm run dev` | 启动开发服务器（调度器随 `instrumentation.ts` 自动拉起，自动消费 pending 任务） |
 | `npm run build` | 生产构建（CI 第四道门禁） |
 | `npm run start` | 启动生产服务器（需先 `npm run build`） |
@@ -208,18 +233,71 @@ docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发
 ## 环境变量
 
 | 变量 | 必填 | 不填会怎样 |
-| :--- | :--- | :--- |
+|---|---|---|
 | `DATABASE_URL` | ✅ | 服务起不来（Prisma 连不上库） |
 | `DEEPSEEK_API_KEY` | — | AI 语义引擎跳过，`uncertain` 变更无人补判，报告照出 |
 | `GITLAB_TOKEN` | — | GitLab Commit Status 回写静默跳过，MR 没有红绿灯 |
-| `WEBHOOK_SECRET` | — | 🔒 **fail-closed**：不填则该接口返回 503（不再跳过校验），`/api/webhook` 整段不可用 |
-| `MANUAL_TRIGGER_TOKEN` | — | 🔒 **fail-closed**：不填则 `POST /api/tasks` 返回 503，首页「触发分析」需填此口令 |
+| `WEBHOOK_SECRET` | — | **fail-closed**：不填则该接口返回 503（不再跳过校验），`/api/webhook` 整段不可用 |
+| `MANUAL_TRIGGER_TOKEN` | — | **fail-closed**：不填则 `POST /api/tasks` 返回 503，首页「触发分析」需填此口令 |
 
 > 🔴 两个写端点（`POST /api/tasks`、`POST /api/webhook`）自 2026-09-16 起均为**安全默认**：
 > **未配置密钥即拒绝**，而不是「未配置即不校验」。因为分析链路会真调 DeepSeek 产生费用，
 > 敞开等于替别人付账。本地开发也需显式配好这两个变量之一才能提交任务。
 
 完整说明见 `.env.example`。数据库二选一：Neon 云库，或 `docker compose up -d` 起本地 Postgres。
+
+---
+
+## 部署
+
+生产运行 = 一个 Next.js 服务器 + 一个 Postgres。**单实例部署下不需要 Redis、消息队列或额外的 worker 进程**——
+调度器随 `instrumentation.ts` 在应用启动时自动拉起（5s 轮询，并发上限 3），分析跑在进程内的 `worker_threads` 里。
+
+> ⚠️ 上句的「**单实例**」是硬前提：SSE 进度推送走的是**进程内**事件总线（`src/lib/events.ts`，EventEmitter 挂 `globalThis`）。
+> 横向扩到**多实例 / Serverless** 后，跨实例订阅失效——浏览器可能一直收不到进度更新（任务本身仍会跑完，可刷新看结果），
+> 届时需把它换成 Redis pub/sub。这是已知边界，登记见 `docs/AUDIT-BACKLOG.md`（D11）。
+
+```bash
+npm ci
+npx prisma generate      # 项目无 postinstall，必须手动跑一次（CI 也是显式一步）
+npx prisma migrate deploy  # 只应用已有迁移，不生成新迁移
+npm run build
+npm run start              # 默认监听 3000
+```
+
+> 🔴 **上生产前必须先配好两个写端点的口令**（`MANUAL_TRIGGER_TOKEN` / `WEBHOOK_SECRET`）。
+> 它们是 **fail-closed** 的——不配就返回 503，对应功能整段不可用。见上方「环境变量」。
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 应用端口 | `3000` | `npm run start` 的默认端口 |
+| 数据库 | Neon 云库，或本地 Docker | 本地：`npm run db:up` / `db:down` → `postgres:16-alpine`，映射宿主机 `5432`，数据卷 `pgdata`，带 `pg_isready` 健康检查 |
+| 迁移（开发） | `npm run prisma:migrate` | 会**生成**新迁移文件 |
+| 迁移（生产） | `npm run prisma:deploy` | **只应用**已有迁移 |
+| 查库 | `npm run prisma:studio` | 可视化查看任务、快照与符号索引 |
+| CI | `.github/workflows/ci.yml` | 单 job，Node 22，依次 `lint → typecheck → test → build`，超时 15 min；push 到 `main` 与所有 PR 都触发 |
+
+本仓库**没有绑定任何托管平台的自动部署**：合并到 `main` 不会触发线上发布，部署方式由你自己选。
+
+---
+
+## 目录结构
+
+```
+prisma/            schema（4 张表）+ 迁移 + seed
+src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
+src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
+worker/            Worker 线程侧引擎（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）—— **有意放在 `src/` 之外**：不进 Next bundle、不参与 tsc
+src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
+tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
+scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
+fixtures/          演示用 git 仓库
+docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发须知(DEVELOPING: 红线/方法论/文件地图) · 审计台账(AUDIT-BACKLOG)
+docs/screenshots/  本 README 引用的界面截图
+.github/           CI（lint → typecheck → test → build 四道门禁，单 job）
+```
+
+详见 [产品文档](docs/product.md) 与 [架构文档](docs/architecture.md)。
 
 ---
 
@@ -257,7 +335,7 @@ docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发
 报告里的数字各有口径，读错口径会得出相反结论。几条最容易踩的：
 
 | 报告显示 | 真实含义 | 常见误读 |
-| :--- | :--- | :--- |
+|---|---|---|
 | 影响链路 **0 条** | **对外接口层面**没检测到变化 | ❌ 误读成「这次改动没影响」——引擎**不解析函数体内部逻辑**，返回值/副作用变了但签名没动，看不到 |
 | 体积 `incomplete` | 部分依赖体积查询失败，`totalBytes` **偏小** | ❌ 误读成「体积没超标」——要看「查询 N / 失败 M」 |
 | 安全门禁 `failed` | 查询本身失败，结果**不可信** | ❌ 误读成「没有漏洞」——UI 会显示失败警示，不会留白 |
@@ -270,16 +348,15 @@ docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发
 
 ---
 
-## 这份文档不够看怎么办
+## 贡献
 
-| 想找什么 | 读哪份 |
-| :--- | :--- |
-| 能力全貌 / 环境变量 / 脚本 | 本文件 README.md |
-| 改代码前必读：红线 / 方法论 / 文件地图 | [docs/DEVELOPING.md](docs/DEVELOPING.md) |
-| 架构设计与规则口径 | [docs/architecture.md](docs/architecture.md) |
-| 产品定位与使用场景 + 已知边界 | [docs/product.md](docs/product.md) |
-| 审计待办台账（审计清单的唯一归属地） | [docs/AUDIT-BACKLOG.md](docs/AUDIT-BACKLOG.md) |
-| 历史审查 / 全链路复跑报告（2026-09-16 ~ 09-19） | **已移出本仓库**，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/` |
+这个项目的规则引擎是一张**查表**——`worker/rules.cjs` 里的 `RULE_TABLE` 决定了一类变更算「高危」还是「低危」。
+表里覆盖的变更类型是有限的：函数签名 10 类、type/interface 字段 8 类、enum 成员 2 类、class 成员 5 类。
+
+**如果你遇到了表里没有的变更类型**（比如某个框架特有的导出模式），欢迎提 PR 加一条规则。
+判断标准只有一个：**能由规则算准的，就不要让它掉进 `uncertain`**——那既慢又贵。
+
+提 PR 前请照 [docs/DEVELOPING.md](docs/DEVELOPING.md) 的红线跑完四道门禁，并给新规则补一条灵敏度验证。
 
 ---
 
