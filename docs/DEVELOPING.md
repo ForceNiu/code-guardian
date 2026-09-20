@@ -171,6 +171,7 @@ worker/                🔴 **Worker 线程侧引擎，有意放在 `src/` 之�
   rules.cjs            确定性规则引擎：semver 口径定级（proven / heuristic / uncertain）
   analyze.worker.cjs   worker 入口：git clone / fetch → resolveRef(→ origin/<ref>) → checkout / 调 analyze-core（.cjs，不进 bundle、不参与 tsc）
 src/lib/
+  config.ts            集中读环境变量（getConfig / validateConfig）—— 模块顶层**不 throw**：`next build` 会执行顶层代码，校验放启动时
   run-analysis.ts      主线程侧桥：new Worker + 软超时 + terminate() 回收（**会被 Next 打包**）
   persist.ts           结果落库（Prisma 事务 + 批量 deleteMany/createMany）
   scheduler.ts         任务调度编排（13 条单测，含 7 个 fake；并发上限 3 + 原子认领 + 卡死回收）
