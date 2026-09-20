@@ -45,10 +45,19 @@ export function verifyGitHubSignature(
   if (!signatureHeader) return false;
   const expected =
     "sha256=" + createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
-  const a = Buffer.from(expected, "utf8");
-  const b = Buffer.from(signatureHeader, "utf8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  return safeEqual(expected, signatureHeader);
+}
+
+/** 常量时间字符串比较（防时序侧信道）。
+ *  P1-8：此前三处 token 比对里**只有 GitHub 签名**用了 `timingSafeEqual`，另外两处是 `!==`
+ *  （`api/webhook/route.ts` 的 `x-gitlab-token`、`api/tasks/route.ts` 的手动触发口令）。
+ *  安全口径不该「看哪个文件是谁写的」—— 三处统一走这里。
+ *  ⚠️ 长度不等时直接返回 false（会泄漏长度，但 token 长度本就固定，业界标准做法）。 */
+export function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
 }
 
 // ---------- GitLab MR ----------

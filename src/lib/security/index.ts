@@ -38,7 +38,12 @@ export function diffDepMaps(
 /** 去掉 semver 范围前缀（^ ~ > < = 空格），取前三段数字比较；无法解析按 0 处理 */
 function compareSemver(a: string, b: string): number {
   const parse = (s: string): number[] => {
-    const parts = s.replace(/[\^~>=<\s]/g, "").split(".");
+    // 🔴 修 P1-5：原写法直接去前缀，遇到 `>=1.2.0 <2.0.0` 会变成 `1.2.02.0.0`，
+    //    split(".") 取前三段得 [1,2,2] —— 上界 `<2.0.0` 的 2 污染了第三段。
+    //    实测判反：`>=1.2.0 <2.0.0` vs `1.2.1` → downgraded（真实 upgraded）。
+    //    先按 `||` 切、再按空白切，只取**首个版本范围**再比较。（零依赖，不引 semver 包）
+    const first = s.split("||")[0].split(/\s+/).filter(Boolean)[0] ?? "";
+    const parts = first.replace(/[\^~>=<\s]/g, "").split(".");
     return parts.slice(0, 3).map((p) => parseInt(p, 10) || 0);
   };
   const pa = parse(a);
@@ -48,6 +53,12 @@ function compareSemver(a: string, b: string): number {
   }
   return 0;
 }
+
+/** P1-3：git show 也要有上限。worker 侧的 `git()` 有 120s 超时，而这里是全仓
+ *  **唯一**一处 `execFileSync` 没给 `timeout` 的地方 —— 大仓库 / 慢盘上挂起会
+ *  永久阻塞事件循环。安全门禁是「尽力而为」的增强，但**挂住就不是增强而是事故**。
+ *  超时会抛错，已被下面现有的 `catch { return null }` 接住，不新增失败路径。 */
+const GIT_SHOW_TIMEOUT_MS = 30000;
 
 /** 读某个 ref 的 package.json 依赖映射；ref=null 表示读工作区当前文件（已 checkout 到 headRef） */
 function readPkgDeps(
@@ -67,6 +78,7 @@ function readPkgDeps(
         cwd: workdir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        timeout: GIT_SHOW_TIMEOUT_MS,
       });
     } catch {
       return null; // git 不可用 / ref 不可达 / 该 ref 无 package.json

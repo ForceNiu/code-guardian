@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Task } from "@prisma/client";
+import type { Repository, Task } from "@prisma/client";
 import { prisma } from "./prisma";
 import { runAnalysis } from "@/lib/run-analysis";
 import { persistSymbolTable, readSymbolCache } from "./persist";
@@ -7,11 +7,37 @@ import { enrichUncertain } from "./ai/enrich";
 import { enrichSecurity } from "./security";
 import { reportGitLabStatus } from "./status/gitlab-status";
 import { getEventBus } from "./events";
+import { pruneRepoCache } from "./repo-cache";
 
 const MAX_CONCURRENT = 3; // 同一时间最多 3 个 Worker 任务
 const POLL_INTERVAL_MS = 5000; // 每 5 秒轮询一次
 const TASK_TIMEOUT_MS = 300000; // P2：单任务硬超时 5 分钟，防挂起占死并发槽
 const STALE_TASK_MS = 600000; // P3：卡在中间态超过 10 分钟视为崩溃，回收重排
+const PRUNE_INTERVAL_MS = 600000; // P0-3：仓库缓存最多每 10 分钟淘汰一次，别每 5 秒扫盘
+const activeWorkdirs = new Set<string>(); // 正在被任务使用的 workdir，淘汰时必须跳过
+let lastPruneAt = 0;
+
+/** P0-3：仓库工作目录只增不减（`ensureRepo()` 只 clone/fetch、从不删），
+ *  定期按「最久未用」淘汰，避免单实例部署下一直涨到磁盘满。
+ *  节流到 10 分钟一次：`dirBytes()` 要递归 stat 整个仓库，大仓库不便宜。
+ *  **失败只记日志** —— 缓存治理不能反过来拖垮分析任务。 */
+function maybePrune() {
+  const now = Date.now();
+  if (now - lastPruneAt < PRUNE_INTERVAL_MS) return;
+  lastPruneAt = now;
+  try {
+    const { removed, freedBytes } = pruneRepoCache(path.join(process.cwd(), ".cache", "repos"), {
+      protectedDirs: activeWorkdirs,
+    });
+    if (removed.length > 0) {
+      console.log(
+        `[scheduler] 仓库缓存淘汰 ${removed.length} 个目录，释放 ${(freedBytes / 1048576).toFixed(1)}MB`,
+      );
+    }
+  } catch (err) {
+    console.error("[scheduler] 缓存淘汰失败:", err instanceof Error ? err.message : err);
+  }
+}
 
 let running = 0;
 let started = false;
@@ -37,6 +63,7 @@ export function stopScheduler() {
 }
 
 async function tick() {
+  maybePrune(); // P0-3：放在并发判断**之前** —— 缓存治理不该被并发占满给饿死
   if (running >= MAX_CONCURRENT) return;
   const slots = MAX_CONCURRENT - running;
 
@@ -86,7 +113,7 @@ async function tick() {
     // 让 processTask 在长操作返回后放弃落库 done，避免覆盖 failed 状态。
     const ctrl = { cancelled: false };
     const timer = setTimeout(() => void onTaskTimeout(task, ctrl), TASK_TIMEOUT_MS);
-    void processTask(task, ctrl).finally(() => {
+    void processTask(task, ctrl).catch((e) => console.error("[scheduler] processTask 未捕获:", e)).finally(() => {
       clearTimeout(timer);
       running--;
     });
@@ -115,18 +142,27 @@ async function onTaskTimeout(task: Task, ctrl: { cancelled: boolean }) {
 }
 
 async function processTask(task: Task, ctrl: { cancelled: boolean }) {
-  const repo = await prisma.repository.findUnique({ where: { id: task.repoId } });
-  if (!repo) {
-    await prisma.task.update({
-      where: { id: task.id },
-      data: { status: "failed", errorMessage: "关联仓库不存在" },
-    });
-    getEventBus().publish(task.id, { status: "failed", errorMessage: "关联仓库不存在" });
-    return;
-  }
-
+  // 🔴 P0-2：下面这两步原先在 try **之外**（那时首个 try 在 `const workdir` 之后）。
+  //    findUnique 抛错时 rejection 无人接：裸 Node 会直接崩进程（实测退出码 1，
+  //    `.finally()` 拦不住）；Next.js 因自带 unhandledRejection 过滤器而不崩，
+  //    但本项目 src/ 下零个 process.on → 转给它内部队列后**谁也不处理 → 静默吞掉**。
+  //    后果：任务停在 parsing，SSE 不推任何事件，只能等 STALE_TASK_MS（10 分钟）被回收。
+  // P0-3：workdir 只依赖 task.repoId（不依赖 repo），提到 try **之前** ——
+  //       这样 finally 里能注销，也保证任务一进来就被登记为「活跃、不可淘汰」。
   const workdir = path.join(process.cwd(), ".cache", "repos", task.repoId);
+  activeWorkdirs.add(workdir);
+  let repo: Repository | null = null;
   try {
+    repo = await prisma.repository.findUnique({ where: { id: task.repoId } });
+    if (!repo) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { status: "failed", errorMessage: "关联仓库不存在" },
+      });
+      getEventBus().publish(task.id, { status: "failed", errorMessage: "关联仓库不存在" });
+      return;
+    }
+
     await prisma.task.update({ where: { id: task.id }, data: { status: "analyzing" } });
     getEventBus().publish(task.id, { status: "analyzing" });
 
@@ -188,10 +224,16 @@ async function processTask(task: Task, ctrl: { cancelled: boolean }) {
     console.error(`[scheduler] 任务 ${task.id} 失败:`, err);
 
     // M5：分析失败也回写 failed 门禁状态。失败静默降级。
-    try {
-      await reportGitLabStatus({ ...task, status: "failed" }, repo, null);
-    } catch {
-      /* GitLab 不可用不阻断任务失败态落库 */
+    // P0-2：repo 可能是 null（findUnique 自己就失败了），此时无从回写。
+    if (repo) {
+      try {
+        await reportGitLabStatus({ ...task, status: "failed" }, repo, null);
+      } catch {
+        /* GitLab 不可用不阻断任务失败态落库 */
+      }
     }
+  } finally {
+    // P0-3：无论成功失败都要注销 —— 否则该目录会被永久豁免，从此再也不会被淘汰。
+    activeWorkdirs.delete(workdir);
   }
 }

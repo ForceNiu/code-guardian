@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { enqueueTask } from "@/lib/enqueue";
+import { safeEqual } from "@/lib/webhook-adapters";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       { status: 503 },
     );
   }
-  if (req.headers.get(MANUAL_TRIGGER_HEADER) !== expected) {
+  if (!safeEqual(req.headers.get(MANUAL_TRIGGER_HEADER) ?? "", expected)) {
     return NextResponse.json({ error: "invalid manual trigger token" }, { status: 401 });
   }
 

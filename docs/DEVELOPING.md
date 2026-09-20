@@ -92,7 +92,7 @@ npm run scan . main~5 main            # 扫自己
 11. 🔴 **AI 调用必须排在 DeepSeek 空闲时段**（**空闲单价 = 高峰的一半**）。
     高峰 = 北京时间 **周一至周五 9:00–12:00、14:00–18:00**；其余（含周末全天）为空闲。
     - 🔴 **AI 调用数 = 2 ×（触发了 AI 的任务数），与 `uncertain` 条数无关**（R4 实测修正）。
-      链路：`scheduler.ts:149` → `enrich.ts:17-18`（**有 uncertain 才进入**）→
+      链路：`scheduler.ts:185` → `enrich.ts:17-18`（**有 uncertain 才进入**）→
       `semantic-graph.ts`（**一次** `graph.invoke`，不按条循环）。图里**只有 2 个 LLM 节点**
       （`predict` + `suggest`；`restate`/`retrieve` 是纯函数），全部变更**打包进同一个 prompt**。
       权威证据：`tests/semantic-graph.test.ts` 直接断言 `mock.calls.length === 2`。
