@@ -117,7 +117,7 @@ npm run dev
 
 > `POST /api/webhook` 是**写端点且 fail-closed**（见下方「环境变量」）：**不配 `WEBHOOK_SECRET` 直接 503**，
 > 配了但**不带 `x-gitlab-token` 头**则 **401**。所以下面的 `-H "x-gitlab-token: …"` **不能省**——
-> 无平台事件头时走的是「统一格式」兼容路径，该路径**同样校验这个 token**（`src/app/api/webhook/route.ts:79`）。
+> 无平台事件头时走的是「统一格式」兼容路径，该路径**同样校验这个 token**（`src/app/api/webhook/route.ts` 中 `safeEqual` 的两处校验之一 —— 无事件头时走的那处）。
 
 ```bash
 # 前置：.env 里已配 WEBHOOK_SECRET（未配则本接口整段返回 503）
@@ -244,7 +244,8 @@ curl -X POST http://localhost:3000/api/webhook \
 > **未配置密钥即拒绝**，而不是「未配置即不校验」。因为分析链路会真调 DeepSeek 产生费用，
 > 敞开等于替别人付账。本地开发也需显式配好这两个变量之一才能提交任务。
 
-完整说明见 `.env.example`。数据库二选一：Neon 云库，或 `docker compose up -d` 起本地 Postgres。
+完整说明见 `.env.example`。所有变量**只在 `src/lib/config.ts` 读取**（`getConfig()`），其余模块不再各自读 `process.env` —— 判空口径只有一处，加新变量时也不会漏。
+数据库二选一：Neon 云库，或 `docker compose up -d` 起本地 Postgres。
 
 ---
 
@@ -286,7 +287,7 @@ npm run start              # 默认监听 3000
 ```
 prisma/            schema（4 张表）+ 迁移 + seed
 src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
-src/lib/           调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
+src/lib/           集中配置 · 调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
 worker/            Worker 线程侧引擎（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）—— **有意放在 `src/` 之外**：不进 Next bundle、不参与 tsc
 src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
 tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
