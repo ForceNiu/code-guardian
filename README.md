@@ -16,7 +16,7 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 | AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里 | 分析大仓库时不卡住接口 |
 | 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 | 想比哪两个提交就比哪两个，不受「当前分支」限制 |
 | 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」 | 回答**「改这个函数会影响谁」**——ESLint 不回答的问题 |
-| 确定性规则引擎 | 25 条查表规则 + `unknown` 兜底（函数签名/字段/别名/重命名导出/enum/class），semver 判据 + confidence 三档 | 约 80% 的变更**不送 AI**：结论可复现、成本可控 |
+| 确定性规则引擎 | 25 条查表规则 + `unknown` 兜底（函数签名 10 类 / type·interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类）＋ semver 判据、confidence 三档 | **绝大多数变更由规则判定**（真实仓库实测 0 `uncertain`）、模糊的才送 AI：结论可复现、成本可控 |
 | AI 语义引擎 | 规则判为 `uncertain` 的变更送 LangGraph 4 节点（DeepSeek）补判定，失败静默降级 | 规则兜不住的那部分才送 AI；**AI 挂了也不阻塞出报告** |
 | 影响链路 | 对比 base/head 导出签名，输出「文件 → 符号 → 变更类型 → 影响文件」 | 直接拿来当**合并门禁的判据**，不用人再读一遍 diff |
 | 任务调度 | 数据库状态机 + 5s 轮询 + 信号量限 3 并发，无 Redis/队列 | 单机就能跑，不引入额外中间件 |
@@ -70,7 +70,7 @@ ESLint 查不出变量污染，Code Review 人工又太慢——本平台用 **A
 | @babel/parser / @babel/traverse | `^7.29.8` | AST 解析与遍历（分析引擎的核心） |
 | @langchain/langgraph | `^1.4.13` | AI 语义引擎 4 节点管线 |
 | @langchain/core | `^1.2.9` | LangGraph 的运行时依赖 |
-| DeepSeek | HTTP 直发（无 SDK） | 语义判定；`node:https`/`node:http` 直连，走代理时自动降级 |
+| DeepSeek | HTTP 直发（无 SDK） | 语义判定；`node:https`/`node:http` 直连，**配了 `HTTPS_PROXY` 则改走 CONNECT 隧道**（undici 不读代理变量，在代理环境会挂死），无代理时直连兜底 |
 | @monaco-editor/react | `^4.7.0` | 新旧文件 Diff 对比 |
 | zod | `^3.25.76` | Webhook 与手动触发入参校验 |
 | node:worker_threads | Node 22 内置 | CPU 密集分析隔离在主线程之外 |
@@ -109,14 +109,24 @@ npm run dev
 
 ## 快速验证 Webhook 幂等
 
+> ⚠️ `POST /api/webhook` 是**写端点且 fail-closed**（见下方「环境变量」）：**不配 `WEBHOOK_SECRET` 直接 503**，
+> 配了但**不带 `x-gitlab-token` 头**则 **401**。所以下面的 `-H "x-gitlab-token: …"` **不能省**——
+> 无平台事件头时走的是「统一格式」兼容路径，该路径**同样校验这个 token**（`src/app/api/webhook/route.ts:78`）。
+
 ```bash
-# 第一次：创建任务
+# 前置：.env 里已配 WEBHOOK_SECRET（未配则本接口整段返回 503）
+export WEBHOOK_SECRET='<你在 .env 里配的值>'
+
+# 第一次：创建任务 ── 期望 HTTP 201 + {"status":"created", …}
 curl -X POST http://localhost:3000/api/webhook \
   -H 'Content-Type: application/json' \
+  -H "x-gitlab-token: $WEBHOOK_SECRET" \
   -d '{"gitUrl":"/绝对路径/code-guardian/fixtures/sample-repo","mrId":"demo-1","commitSha":"<head-sha>","baseRef":"<base-sha>","headRef":"<head-sha>"}'
 
-# 第二次（同 payload）：应返回 duplicate，不重复入队
+# 第二次（同 payload）：应返回 {"status":"duplicate"} + HTTP 200，不重复入队
 ```
+
+> 若把 `-H "x-gitlab-token: …"` 换成真实 GitLab 的 `X-Gitlab-Event: Merge Request Hook` 头，走的就是真正的 MR 适配路径。
 
 ---
 
