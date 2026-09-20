@@ -25,6 +25,12 @@
 | ⛔ | **明确不做**（`won't fix`）—— 必须写理由 + 「什么条件下回头」 |
 | ❓ | 待定（缺前置条件，不是缺决定） |
 
+> 📌 **引用约定（2026-09-21）**：本文件里的 `文件:行号` 都是**写下当时**的位置 ——
+> 历次文档修订（2026-09-21 的 README 重写、各轮 AUD / T 的措辞修正）都会让行号漂移。
+> **核验一律按引用里引号内的「原话 / 标识符」去 `grep`，不要按行号定位**；要按行号读，请 `git show <当时提交>:<文件>`。
+> 因此：**指「当时那句错话在哪」的行号按本约定保留原值**（重指向 = 篡改证据）；
+> 只有**指「今天还在的内容」**的引用才写成稳定定位（章节名 / 表名 ＋ `grep -n` 命令）。
+
 ---
 
 ## 一、✅ 已完成
@@ -315,7 +321,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | D7 | 渲染层截图（详情页五块） | §二.18 | 用无头浏览器对内容块逐块截图 | ✅ **已验**：8 个内容块全部截到并逐张看过（`~/WorkBuddy/AI/cg-screenshots/d7-2026-09-20/`）。⚠️ 暴出缺陷 ② |
 | D8 | Monaco 离线化（旧「D4」） | §二.2 / §二.18 | 明确终态 | 🔴 **不是「不做」，是「没做干净」** → 缺陷 ② |
 | D9 | fork 仓库 PR | §二.18 | 明确：是否维持「M2 已知边界」 | ✅ **已做**（2026-09-20）：`webhook-adapters.ts:153-156` 已改为**如实声明**（2026-09-20 晚因新增 `safeEqual()` 下移 9 行）「只支持同仓 PR，不支持 fork PR」，并写明后果（`head.sha` 不在目标仓库 → `git checkout --force` 不可达 → 任务落 `failed`，属「响的」失败）。**不再挂「待补齐」** |
-| D10 | 支持 `.vue`（= U4(c)） | §二.12 · U4 | 明确：立独立项 / ⛔ + 理由 | ✅ **已定**：维持**范围外**（A1 已声明，`README.md:250` + `:253`）。理由：拆 `<script>` + 行号偏移 + 模板引用属大工程，与「TS/JS 栈影响链路」定位不符 |
+| D10 | 支持 `.vue`（= U4(c)） | §二.12 · U4 | 明确：立独立项 / ⛔ + 理由 | ✅ **已定**：维持**范围外**（A1 已声明，见 `README.md` 的「已知边界（判读报告时必读）」表，按 `grep -n '不含 .vue' README.md` 定位）。理由：拆 `<script>` + 行号偏移 + 模板引用属大工程，与「TS/JS 栈影响链路」定位不符 |
 | D11 | `events.ts` 多实例 TODO | 清点新发现 | 登记进「已知边界」/ ⛔ + 理由 | ✅ **已做**（2026-09-20）：`README.md` 部署节已补声明 —— 「不需要 Redis」以**单实例**为前提（SSE 走进程内事件总线，挂 `globalThis`），多实例 / Serverless 下跨实例订阅失效，需换 Redis pub/sub |
 
 **D3 判据修正（重要）**：§二.18 原写「同仓库同 commit 跑两次，看第二次是否命中」——**这条判据本身无效**。
@@ -368,7 +374,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | **AUD-3** | §二 C 组 C1 ＋ §四.1 | GitLab 回写「**外部依赖，当前环境不可验**」，回头条件「拿到 token + 真实项目」 | 仓库外 `E2E-RERUN-2026-09-19.md:130` 记 F2 = **L3**（假 GitLab 收到真实 POST + `PRIVATE-TOKEN` 头）= ✅ 真跑通 | ✅ **已更正为「已验（L3）」**（两处同步，原文划删除线保留）。📌 教训：判「不可验证」前先问它依赖的是**厂商**还是**协议** —— 依赖协议 → **造假服务即可验真，无需真账号** |
 | **AUD-4** | `docs/DEVELOPING.md:186` | 单测「**17 个文件**」 | 实测 **18**（`ls tests/*.test.* \| wc -l`；全仓测试文件仅存在于 `tests/`） | ✅ **已修**为 18 + 复测命令 + 「此数随开发增长」。⚠️ 同条 S5(`:97`) 曾把「10 个」改成「17」，**又过期了** —— 「写死数字必被同批改动顶掉」 |
 | **AUD-5** | `docs/product.md:112` | 「单元测试 **238 个**」 | 实测 **250**（18 个文件的 `^test(` 加总复算命中） | ✅ **已修**为 250 + 复测命令（原 hedge「此数随开发增长，用前复测」保留） |
-| **AUD-6** | `docs/architecture.md:173` | `enrichSecurity(result, workdir)` | 真实签名 **4 参**：`enrichSecurity(output.result, workdir, task.baseRef, task.headRef)`（`src/lib/scheduler.ts:188`，2026-09-20 晚因 P0-2 把 `findUnique` 移进 try 而下移 36 行） | ✅ **已修**为完整 4 参 |
+| **AUD-6** | `docs/architecture.md` 架构图里 `enrichSecurity(...)` 那一行（按 `grep -n 'enrichSecurity' docs/architecture.md` 定位，共 2 处、取架构图那处） | `enrichSecurity(result, workdir)` | 真实签名 **4 参**：`enrichSecurity(output.result, workdir, task.baseRef, task.headRef)`（`src/lib/scheduler.ts:188`，2026-09-20 晚因 P0-2 把 `findUnique` 移进 try 而下移 36 行） | ✅ **已修**为完整 4 参 |
 | **AUD-7** | `:777`（§二.17 表「G1 HTML 说明书」行） | 列 2 写 `docs/g1-spec.html` | **复核为非缺陷**：该表列 2 的表头是「**原位置（仓库内，已不存在）**」，同表其他行（`docs/learning/ROADMAP.md`）同理 → **它就是故意的历史路径，不是死链**，与 `:529` 也不矛盾 | ⛔ **不改**。⚠️ **本条是审计脚本的假阳性**（脚本把反引号路径一律当活引用）——记在此处，**避免下次又当新问题发现一遍** |
 | **AUD-8** | `docs/DEVELOPING.md:17` | 「四道门禁 —— 与 CI **完全一致**」 | `ci.yml` 里是裸 `npm run lint / typecheck / test / build`，**没有** `env -u NODE_OPTIONS`（该前缀只是沙箱本地需要，§2.7 自陈） | ✅ **已修**为「**同一套命令**（沙箱里额外加 `env -u NODE_OPTIONS`）」 |
 | **AUD-9** | `src/lib/run-analysis.ts:22` vs `docs/DEVELOPING.md:194` | 注释写「同步点共 **3 处**」；文档写「共 **4 处**」 | **两个数都对**（3 处把两个测试文件合并算 1；4 处拆开算），但并列会让人怀疑其一有错。**4 处的行号逐条核对全对** | ✅ **已统一**：代码注释改为「共 4 处」并列出 4 个位置，与 `DEVELOPING.md` §4 口径一致 |
@@ -397,8 +403,8 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 
 | 新号 | 位置 | 写的 | 实际 | 处置 |
 |---|---|---|---|---|
-| **AUD-12** | `README.md:110-119` | 「快速验证 Webhook 幂等」的 curl 示例 —— 只有 `-H 'Content-Type'`，**无任何鉴权头** | 当前代码下**照抄必失败**：`src/app/api/webhook/route.ts` 的 `if (!secret)` 分支（按 `grep -n 'if (!secret)' src/app/api/webhook/route.ts` 定位）未配 `WEBHOOK_SECRET` → **503**；无事件头兼容路径**同样**校验该 token，缺 `x-gitlab-token` → **401**。**且与 `README.md` 自身的 fail-closed 声明自相矛盾**（「环境变量」表里 `WEBHOOK_SECRET` / `MANUAL_TRIGGER_TOKEN` 两行 ＋ 部署节的「上生产前必须先配好两个写端点的口令」提示，按 `grep -n 'fail-closed' README.md` 定位）—— D5 fail-closed 改造（2026-09-16）之后示例没同步 | ✅ **已修**：补 `-H "x-gitlab-token: $WEBHOOK_SECRET"` ＋ 前置「必须先配 secret」声明 ＋ 期望码（201 created / 200 duplicate）＋ 真 MR 适配路径提示 |
-| **AUD-13** | `README.md:19` ＋ `docs/product.md:53` | 「25 条查表规则 + `unknown` 兜底（函数签名/字段/**别名**/**重命名导出**/enum/class）」= **列了 6 类** | `RULE_TABLE`（`worker/rules.cjs:222-252`）实为 **4 类**：签名 **10** ＋ 字段 **8** ＋ enum **2** ＋ class **5** ＝ **25**。「别名」在 `rules.cjs:291-297` 是**复用字段级规则**、「重命名导出」是 `runRules:264` 的**内联分支** → **两者都不占条目**。与 `docs/architecture.md:157` 的精确口径**直接冲突** | ✅ **已修**：两处统一为「函数签名 10 类 / type·interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类」。复测：`rg '别名/重命名导出'` 应 **0 命中** |
+| **AUD-12** | `README.md` 的「快速验证 Webhook 幂等」章节 | 「快速验证 Webhook 幂等」的 curl 示例 —— 只有 `-H 'Content-Type'`，**无任何鉴权头** | 当前代码下**照抄必失败**：`src/app/api/webhook/route.ts` 的 `if (!secret)` 分支（按 `grep -n 'if (!secret)' src/app/api/webhook/route.ts` 定位）未配 `WEBHOOK_SECRET` → **503**；无事件头兼容路径**同样**校验该 token，缺 `x-gitlab-token` → **401**。**且与 `README.md` 自身的 fail-closed 声明自相矛盾**（「环境变量」表里 `WEBHOOK_SECRET` / `MANUAL_TRIGGER_TOKEN` 两行 ＋ 部署节的「上生产前必须先配好两个写端点的口令」提示，按 `grep -n 'fail-closed' README.md` 定位）—— D5 fail-closed 改造（2026-09-16）之后示例没同步 | ✅ **已修**：补 `-H "x-gitlab-token: $WEBHOOK_SECRET"` ＋ 前置「必须先配 secret」声明 ＋ 期望码（201 created / 200 duplicate）＋ 真 MR 适配路径提示 |
+| **AUD-13** | `README.md:19` ＋ `docs/product.md:53` | 「25 条查表规则 + `unknown` 兜底（函数签名/字段/**别名**/**重命名导出**/enum/class）」= **列了 6 类** | `RULE_TABLE`（`worker/rules.cjs:222-252`）实为 **4 类**：签名 **10** ＋ 字段 **8** ＋ enum **2** ＋ class **5** ＝ **25**。「别名」在 `rules.cjs:291-297` 是**复用字段级规则**、「重命名导出」是 `runRules:264` 的**内联分支** → **两者都不占条目**。与 `docs/architecture.md` 的「确定性规则引擎」条目口径（按 `grep -n '规则覆盖函数签名' docs/architecture.md` 定位）**直接冲突** | ✅ **已修**：两处统一为「函数签名 10 类 / type·interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类」。复测：`rg '别名/重命名导出'` 应 **0 命中** |
 | **AUD-14** | `docs/architecture.md:194` | 「8 并发 + **单包失败静默跳过**；累计总体积 + 最大单包」 | **U8 修复前的旧口径残留**。`src/lib/security/bundle-size.ts:72-90` 明写「**不再静默**」：失败包计入 `failedCount` 并置 `incomplete`；报告页 `src/app/tasks/[id]/page.tsx:452-455` 出「共查询 N 个包，其中 M 个查询失败未计入」 | ✅ **已修**：「单包失败**不再静默**（U8，2026-09-19）—— 计入 `failedCount` 并置 `incomplete`，报告页显式提示」。复测：`rg '单包失败静默跳过'` 应 **0 命中**。<br>🔴 **为什么这条最要紧**：它把**已经修好的防线说成「会少报、而且不提示」**，正撞本项目红线「致命缺陷全在少报方向」 |
 | **AUD-15** | `README.md:73` | DeepSeek 行：「`node:https`/`node:http` 直连，走代理时**自动降级**」 | 实为**自动改道**，不是降级：`src/lib/ai/deepseek.ts` 的 `httpsViaProxy`（按 `grep -n 'function httpsViaProxy' src/lib/ai/deepseek.ts` 定位）—— 配了 `HTTPS_PROXY`/`HTTP_PROXY` 走 **CONNECT 隧道**，未配则回退 `httpsDirect` 直连。「降级」暗示质量变差，**方向会被读反** | ✅ **已修**：「配了 `HTTPS_PROXY` 则**改走 CONNECT 隧道**（undici 不读代理变量，在代理环境会挂死），无代理时直连兜底」 |
 | **AUD-16** | `docs/product.md:115` ＋ §10.3 | 体积门禁「累计 unpackedSize **100MB**」—— **无统计范围口径** | **漏**了「只统计**顶层直接依赖**」（`bundle-size.ts:1-3` 明写；本台账 `:210` 早已记）。而 CVE 那条（`product.md:114`）明写「完整依赖树，**含传递依赖**」→ **两条口径不对称**，而 §10.3 的定位正是「**判读报告前必读**」 | ✅ **已修**：`:115` 补「**只统计顶层直接依赖**，不含传递依赖」；§10.3 新增第三条 bullet「**两个数字的统计口径不同，不能互相推**」 |
@@ -430,7 +436,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | **AUD-23** | `docs/DEVELOPING.md:79-80` | 「本环境代理**只放行 `api.github.com`、拦 `github.com`**」 | 与**同节 `:71`** 的「`github.com` **时通时不通**」**自相矛盾**；且 **2026-09-20 实测推翻绝对化写法**：`git ls-remote`、`git push`、两次完整 PR 流程**全部走通** | ✅ **已修**：删掉「只放行 / 拦」的绝对判断，统一为「**时通时不通**」并写明实测 |
 | **AUD-24** | `docs/DEVELOPING.md:221` | 合并后用 **`--is-ancestor` 确认快进关系** | **在本仓库工作流下恒为假** —— 本仓库只用 **squash merge**（§2 规则 2），squash 是**新提交**，`merge-base --is-ancestor <分支head> origin/main` 必然不成立 | ✅ **已修**：换成 `git diff --stat <分支head> origin/main` **输出为空**（这正是 PR #29 / #30 实际用的判据） |
 | **AUD-25** | `docs/product.md:39`、`:49` | 「首页粘贴仓库地址 + base/head ref **即可**分析」 | **漏 fail-closed 前置**：未配 `MANUAL_TRIGGER_TOKEN` 时 `POST /api/tasks` **直接 503**，且首页必须**填口令**（`x-manual-trigger-token`，见 `src/app/api/tasks/route.ts` 的 `if (!expected)` 分支，按 `grep -n 'if (!expected)' src/app/api/tasks/route.ts` 定位）。`README.md` 里两处都写了（「环境变量」表中 `WEBHOOK_SECRET` / `MANUAL_TRIGGER_TOKEN` 两行 ＋ 部署节的「上生产前必须先配好两个写端点的口令」提示，按 `grep -n 'fail-closed' README.md` 定位），**product.md 全文一处没提** | ✅ **已修**：两处补「+ 访问口令」＋「未配置则接口返回 503」 |
-| **AUD-26** | `.env.example:9` | 「AI 语义引擎（**M3 里程碑才用到，M1-M2 可不填**）」 | M1–M5 已全部完成（`README.md:6`）→ 按里程碑描述的措辞**已失效**。且真实行为不是「可不填」而是**优雅降级**：`src/lib/ai/enrich.ts:22` 打 warn 后跳过，报告照出（`README.md:213` 同口径） | ✅ **已修**：改为「（可选）……未填 = 跳过 AI 判定，报告照出」 |
+| **AUD-26** | `.env.example:9` | 「AI 语义引擎（**M3 里程碑才用到，M1-M2 可不填**）」 | M1–M5 已全部完成（见 `README.md` 开篇「当前进度」，按 `grep -n '当前进度' README.md` 定位）→ 按里程碑描述的措辞**已失效**。且真实行为不是「可不填」而是**优雅降级**：`src/lib/ai/enrich.ts:22` 打 warn 后跳过，报告照出（`README.md` 的「环境变量」表 `DEEPSEEK_API_KEY` 行同口径，按 `grep -n 'DEEPSEEK_API_KEY' README.md` 定位） | ✅ **已修**：改为「（可选）……未填 = 跳过 AI 判定，报告照出」 |
 | **AUD-27** | `docs/DEVELOPING.md:51` | 「`cacheHits` 非 0 → `totalFiles − changedFileCount` **算术闭合**」 | **缺前提**：`cacheHits` 由 `hitCache` 累加（`worker/analyze.worker.cjs` 的 `let cacheHits = 0` 与 `if (hitCache) cacheHits++`；⚠️ **别写死行号** —— 2026-09-20 修 P0-1 时已从 `:138,153` 漂到约 `:170,185`，请按 `grep -n "cacheHits"` 定位），条件是「**未变更 且 快照命中**」→ 只有**缓存全命中**时才恰好等于那个差值，**部分命中则小于** | ✅ **已修**：补「条件是『未变更 且 快照命中』；**仅当每个未变更文件都命中**时才等于……」 |
 | **AUD-28** | `docs/DEVELOPING.md:108`、`:192` | 归档目录「**5 份**复跑/审计报告」＋「`frontend-redesign.md`、`reports/` 下 **5 份**」＝ 6 项 | 实际 **7 个**文件 —— 多出的 `CODE_REVIEW_REPORT.md` 全文未提（属**列举不全**，不影响正确性） | ✅ **已修**：两处统一为「**7 份**（6 份复跑/审计报告 ＋ `frontend-redesign.md`）」。复测：该目录 `ls \| wc -l` = **7** |
 
