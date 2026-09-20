@@ -10,6 +10,8 @@ export interface DependencyInfo {
   name: string;
   version: string; // 精确版本（lockfile）或 semver 范围（仅 package.json 时）
   isDirect: boolean;
+  /** U7(b)：是否仅 devDependencies（lockfile 的 dev 标记 / package.json 的 devDependencies） */
+  isDev?: boolean;
 }
 
 /** 提取出的依赖清单 */
@@ -21,14 +23,18 @@ export interface DependencyManifest {
   hasLockfile: boolean;
 }
 
-/** 从 package.json 提取顶层依赖 name -> 声明版本 */
-function readDirect(root: string): Record<string, string> {
+interface DirectMaps {
+  deps: Record<string, string>;
+  dev: Record<string, string>;
+}
+/** 从 package.json 提取顶层依赖；分别保留 dependencies / devDependencies，供 isDev 标记 */
+function readDirect(root: string): DirectMaps {
   const pkgPath = path.join(root, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
-  return { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  return { deps: pkg.dependencies ?? {}, dev: pkg.devDependencies ?? {} };
 }
 
 /**
@@ -40,7 +46,7 @@ function readLockfile(root: string): DependencyInfo[] | null {
   const lockPath = path.join(root, "package-lock.json");
   if (!fs.existsSync(lockPath)) return null;
   const lock = JSON.parse(fs.readFileSync(lockPath, "utf8")) as {
-    packages?: Record<string, { version?: string }>;
+    packages?: Record<string, { version?: string; dev?: boolean }>;
   };
   const packages = lock.packages;
   if (!packages) return null;
@@ -51,7 +57,7 @@ function readLockfile(root: string): DependencyInfo[] | null {
     const segments = pkgPath.split("node_modules/");
     const name = segments[segments.length - 1];
     if (!name) continue;
-    out.push({ name, version: meta.version, isDirect: false });
+    out.push({ name, version: meta.version, isDirect: false, isDev: meta.dev === true });
   }
   return out;
 }
@@ -61,10 +67,13 @@ export function readManifest(root: string): DependencyManifest | null {
   const pkgPath = path.join(root, "package.json");
   if (!fs.existsSync(pkgPath)) return null;
 
-  const directMap = readDirect(root);
-  const direct = Object.entries(directMap)
+  const { deps: depMap, dev: devMap } = readDirect(root);
+  const direct = [
+    ...Object.entries(depMap),
+    ...Object.entries(devMap),
+  ]
     .filter(([name]) => !name.startsWith("@types/")) // @types 纯类型包，不参与体积/运行时漏洞扫描
-    .map(([name, version]) => ({ name, version, isDirect: true }));
+    .map(([name, version]) => ({ name, version, isDirect: true, isDev: devMap.hasOwnProperty(name) }));
 
   const directNames = new Set(direct.map((d) => d.name));
   const lockEntries = readLockfile(root);

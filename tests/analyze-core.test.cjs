@@ -158,10 +158,25 @@ test("parseFile 提取函数参数类型 / 可选 / 返回类型 / async", () =>
   ]);
 });
 
-test("parseFile 对空代码 / 非法代码安全降级为空", () => {
-  assert.deepEqual(parseFile(""), { exports: [], imports: [], reexports: [] });
-  assert.deepEqual(parseFile("   "), { exports: [], imports: [], reexports: [] });
-  assert.deepEqual(parseFile("const = = 语法错误"), { exports: [], imports: [], reexports: [] });
+test("parseFile 对空代码 / 非法代码安全降级为空（U5：并带失败原因）", () => {
+  // 空文件 → "empty"
+  assert.deepEqual(parseFile(""), { exports: [], imports: [], reexports: [], parseError: "empty" });
+  assert.deepEqual(parseFile("   "), { exports: [], imports: [], reexports: [], parseError: "empty" });
+
+  // 代码本身有语法错 → "syntax"（是使用者的问题）
+  const bad = parseFile("const = = 语法错误");
+  assert.deepEqual(bad.exports, []);
+  assert.equal(bad.parseError, "syntax");
+
+  // 🔴 U5 的关键：装饰器属于「我们没开插件」= "unsupported"，
+  //    必须与「你代码有语法错」区分开 —— 前者要我们去补能力，后者不是我们的锅。
+  const decorated = parseFile("@Component({ selector: \"x\" })\nexport class Foo {}");
+  assert.deepEqual(decorated.exports, []);
+  assert.equal(decorated.parseError, "unsupported");
+
+  // 正常代码不应带 parseError
+  const ok = parseFile("export const a = 1;");
+  assert.equal(ok.parseError, undefined);
 });
 
 test("resolveImport 解析相对路径并补全扩展名", () => {

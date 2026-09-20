@@ -29,7 +29,11 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".c
 const GIT_TIMEOUT_MS = 120000;
 function git(args, cwd) {
   try {
-    return execFileSync("git", args, {
+    // 🔴 关闭 quotepath：git 默认 core.quotepath=true，会把非 ASCII 路径（中文文件名）
+    //    转义成 "src/\347\224\250...ts" 并加引号，与 listSourceFiles() 用 fs.readdirSync
+    //    拿到的真实路径对不上 → 这些文件的变更会被静默丢弃（U11，漏报方向）。
+    //    放在这里统一生效，覆盖 clone / fetch / checkout / diff / show 全部调用。
+    return execFileSync("git", ["-c", "core.quotepath=false", ...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -132,11 +136,14 @@ function main() {
   const reexportsByFile = new Map(); // barrel 转发边：file -> [{ source, line }]
   const hashByFile = new Map();
   let cacheHits = 0;
+  // U5（2026-09-19）：按原因累计解析失败数，最终进 summary.parseFailures。
+  // 此前解析失败完全静默，"我们不支持"和"你代码有错"在报告上长得一模一样。
+  const parseFailures = {};
   for (const file of allFiles) {
     const content = fs.readFileSync(path.join(workdir, file), "utf8");
     const hash = md5(content);
     hashByFile.set(file, hash);
-    const { exports, imports, reexports, hitCache } = resolveFileSymbols(
+    const { exports, imports, reexports, hitCache, parseError } = resolveFileSymbols(
       file,
       changedSet.has(file),
       content,
@@ -144,6 +151,8 @@ function main() {
       cache,
     );
     if (hitCache) cacheHits++;
+    // "unsupported" = 我们的能力边界；"syntax" = 代码本身有语法错；"empty" = 空文件
+    if (parseError) parseFailures[parseError] = (parseFailures[parseError] || 0) + 1;
     exportsByFile.set(file, exports);
     importsByFile.set(file, imports);
     reexportsByFile.set(file, reexports || []);
@@ -218,6 +227,8 @@ function main() {
     changedFileCount: changed.length,
     changedSymbolCount: changedSymbols.length,
     cacheHits,
+    // U5：解析失败按原因计数。全为 0 时该对象为空 {} —— 前端据此判断"有没有文件没被看懂"。
+    parseFailures,
     high: impactChain.filter((i) => i.severity === "high").length,
     medium: impactChain.filter((i) => i.severity === "medium").length,
     low: impactChain.filter((i) => i.severity === "low").length,
