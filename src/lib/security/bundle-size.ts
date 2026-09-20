@@ -43,7 +43,8 @@ interface RegistryVersion {
 }
 
 /**
- * 测量顶层依赖总体积。单个包查询失败（404/网络）静默跳过，不影响整体。
+ * 测量顶层依赖总体积。单个包查询失败（404/网络/超时）**不再静默**——
+ * 计入 `failedCount` 并置 `incomplete`，由报告页显式提示（U8）。
  * fetchImpl 可注入以便单测 mock。
  */
 export async function measureBundleSize(
@@ -68,6 +69,11 @@ export async function measureBundleSize(
     }
   });
 
+  // U8（2026-09-19）：把「查询失败」的包单独留下来，而不是丢掉后当没发生过。
+  // 原逻辑：非 2xx 与 catch 都记 bytes:0，再被 filter(bytes > 0) 静默丢弃 →
+  //   totalBytes **少算**、packageCount **只数成功的**，且**无任何提示**。
+  // 后果：报告上「未超阈值」可能只是「压根没查全」—— 与本项目红线「少报最危险」同向。
+  const failed = rows.filter((r) => r.bytes === 0);
   const packages = rows
     .filter((r) => r.bytes > 0)
     .sort((a, b) => b.bytes - a.bytes);
@@ -78,6 +84,10 @@ export async function measureBundleSize(
   return {
     totalBytes,
     packageCount: packages.length,
+    // ↓ U8 新增三项：让「数据不完整」在报告上可见
+    queriedCount: rows.length,
+    failedCount: failed.length,
+    incomplete: failed.length > 0,
     largest,
     thresholdBytes: TOTAL_THRESHOLD_BYTES,
     exceeded: totalBytes > TOTAL_THRESHOLD_BYTES,

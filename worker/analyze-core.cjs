@@ -278,20 +278,39 @@ function isSignatureBearing(node) {
   );
 }
 
-/** 解析单文件，提取导出符号 + import 声明（解析失败安全降级为空） */
+/**
+ * 把 Babel 解析失败归类（U5，2026-09-19）。
+ *
+ * 此前 catch 一律返回三个空数组，三种性质完全不同的情况在报告上**长得一模一样**：
+ *   ① "unsupported" —— **我们的能力边界**（没开对应插件：装饰器 / .vue / 新语法）
+ *   ② "syntax"      —— **用户代码本身有语法错误**
+ *   ③ "empty"       —— 空文件
+ * ① 需要我们去补能力，② 是使用者的问题，混为一谈等于把"我们不支持"伪装成"没问题"。
+ * 🔴 与项目红线同向：致命缺陷全在「少报」方向（见 docs/DEVELOPING.md §1）。
+ */
+function classifyParseError(err) {
+  const msg = (err && err.message) || "";
+  // Babel 对未启用插件的典型措辞：「This experimental syntax requires enabling the parser plugin: decorators」
+  if (/requires enabling|parser plugin|experimental syntax|Cannot use import statement/i.test(msg)) {
+    return "unsupported";
+  }
+  return "syntax";
+}
+
+/** 解析单文件，提取导出符号 + import 声明（解析失败安全降级为空，但**带失败原因**） */
 function parseFile(code) {
   const exports = [];
   const imports = [];
   const reexports = []; // export * from "./x"（barrel 转发边，供影响图穿透到定义处）
-  if (!code || !code.trim()) return { exports, imports, reexports };
+  if (!code || !code.trim()) return { exports, imports, reexports, parseError: "empty" };
   let ast;
   try {
     ast = parser.parse(code, {
       sourceType: "unambiguous",
       plugins: ["typescript", "jsx"],
     });
-  } catch {
-    return { exports, imports, reexports };
+  } catch (err) {
+    return { exports, imports, reexports, parseError: classifyParseError(err) };
   }
 
   // 预扫描顶层声明：`export default Page` 这种「先声明、后导出」的写法需要借 local 声明的签名，
@@ -733,7 +752,8 @@ function pairRenameExports(changed) {
  * 决定某文件的导出符号 + import 用缓存还是重新解析（增量缓存核心判断，纯函数）。
  * - 变更文件：始终重新解析（内容变了，缓存不可信）
  * - 未变更文件：内容哈希命中缓存则复用，否则解析
- * 返回 { exports, imports, reexports, hitCache }。
+ * 返回 { exports, imports, reexports, parseError?, hitCache }
+ * （parseError 见 parseFile 的 U5 说明；缓存命中分支不带该字段）。
  */
 function resolveFileSymbols(file, isChanged, content, hash, cache) {
   if (!isChanged && cache && cache.hashByFile && cache.hashByFile[file] === hash) {
@@ -749,6 +769,8 @@ function resolveFileSymbols(file, isChanged, content, hash, cache) {
     exports: parsed.exports,
     imports: parsed.imports,
     reexports: parsed.reexports,
+    // U5：透传解析失败原因（undefined 表示解析成功），供上层汇总到 summary.parseFailures
+    parseError: parsed.parseError,
     hitCache: false,
   };
 }

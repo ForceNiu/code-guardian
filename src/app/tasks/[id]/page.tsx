@@ -55,6 +55,19 @@ function confidenceLabel(conf: string): string {
   return "待定";
 }
 
+// U6(b)：把「本次 PR 改动依赖」浓缩成一行摘要；非 ok（unknown / 未比对）返回 null
+function summarizeDepChanges(dc: { status: string; changes: { kind: string }[] } | undefined): string | null {
+  if (!dc || dc.status !== "ok") return null;
+  if (dc.changes.length === 0) return "未改动";
+  const n = (k: string) => dc.changes.filter((x) => x.kind === k).length;
+  const parts: string[] = [];
+  if (n("added")) parts.push(`新增 ${n("added")}`);
+  if (n("upgraded")) parts.push(`升级 ${n("upgraded")}`);
+  if (n("downgraded")) parts.push(`降级 ${n("downgraded")}`);
+  if (n("removed")) parts.push(`移除 ${n("removed")}`);
+  return parts.join(" · ");
+}
+
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -169,6 +182,11 @@ export default function TaskDetailPage() {
   }
 
   const r = task.result;
+  // U6(b)：本次 PR 改动依赖的摘要 + 「新增」依赖名集合（用于漏洞表打徽标）
+  const depChangesText = summarizeDepChanges(r?.securityStatus?.depChanges);
+  const addedDeps = new Set(
+    (r?.securityStatus?.depChanges?.changes ?? []).filter((c) => c.kind === "added").map((c) => c.name),
+  );
 
   return (
     <div className="mx-auto max-w-7xl px-6 pb-16 pt-10">
@@ -224,6 +242,34 @@ export default function TaskDetailPage() {
               「改动文件 → 导出符号 → 规则引擎/AI 语义引擎定级 → 引用方文件」的完整链路：
               规则引擎能确定的直接定级，归不了类的 <code className="px-1.5 py-0.5 text-xs font-mono bg-muted rounded">uncertain</code> 变更送 AI 语义引擎二次判定并给出修复建议。
             </p>
+
+            {/* U10：这条边界此前全仓未声明 —— 「0 条」会被读成「安全」 */}
+            <div className="mb-4 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">⚠️ 边界：</span>
+              本工具判断的是「<strong className="text-foreground">对外接口（导出签名）</strong>」有没有变。
+              <strong className="text-foreground">函数体内部的实现改动不会产生任何条目</strong>
+              —— 哪怕行为已经变了。所以「影响链路 0 条」<strong className="text-foreground">不等于</strong>「这个改动没有影响」。
+            </div>
+
+            {/* U5：解析失败此前完全静默，「我们不支持」与「你代码有错」长得一样 */}
+            {r.summary?.parseFailures && Object.keys(r.summary.parseFailures).length > 0 && (
+              <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+                <span className="font-medium text-amber-700 dark:text-amber-300">⚠️ 部分文件未能解析：</span>
+                <span className="text-muted-foreground">
+                  {r.summary.parseFailures.unsupported
+                    ? ` ${r.summary.parseFailures.unsupported} 个含暂不支持的语法（如装饰器）`
+                    : ""}
+                  {r.summary.parseFailures.syntax
+                    ? ` ${r.summary.parseFailures.syntax} 个存在语法错误`
+                    : ""}
+                  {r.summary.parseFailures.empty
+                    ? ` ${r.summary.parseFailures.empty} 个是空文件`
+                    : ""}
+                  {" —— 这些文件不参与影响链路分析，下面的结论可能不完整。"}
+                </span>
+              </div>
+            )}
+
             <ImpactTable edges={r.impactChain} />
           </div>
 
@@ -293,14 +339,43 @@ export default function TaskDetailPage() {
           )}
 
           {/* 安全门禁 */}
-          {(r.vulnerabilities || r.bundleSize) && (
+          {(r.vulnerabilities || r.bundleSize || r.securityStatus) && (
             <div className="rounded-xl border border-border/50 bg-card p-6 shadow-sm mb-6">
               <div className="flex items-baseline justify-between gap-4 mb-4">
                 <h2 className="text-base font-semibold tracking-tight">安全门禁</h2>
               </div>
               <p className="mb-4 text-sm text-muted-foreground">
-                M5 依赖安全检测：CVE 漏洞扫描（npm 官方漏洞库）+ 依赖体积门禁。扫描失败时本卡片缺失、不影响主分析。
+                M5 依赖安全检测：CVE 漏洞扫描（npm 官方漏洞库）+ 依赖体积门禁。
+                <strong className="text-foreground">
+                  这是「全仓依赖体检」，与本次改动是否碰过依赖无关
+                </strong>
+                —— 列表中每条漏洞都来自「当前依赖树真实存在的包」，不代表本次 PR 引入了它；
+                右侧「中招版本」是该漏洞影响的版本区间，不是本次改动的影响范围。
               </p>
+
+              {/* U6(b)：把「本次 PR 动了哪些依赖」单独说出来，与「全仓体检」区分 */}
+              {depChangesText && (
+                <div className="mb-4 text-sm text-muted-foreground">
+                  {depChangesText === "未改动"
+                    ? "本次 PR 未改动 package.json（下方漏洞均来自既有依赖树）。"
+                    : `本次 PR 改动依赖：${depChangesText}（仅指 package.json 声明变化，非漏洞数）。`}
+                </div>
+              )}
+
+              {/* U9：扫描「没产出」必须看得见，不能靠整块消失来暗示 */}
+              {r.securityStatus &&
+                (r.securityStatus.vulnerabilities !== "ok" || r.securityStatus.bundleSize !== "ok") && (
+                  <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+                    <span className="font-medium text-amber-700 dark:text-amber-300">⚠️ 安全门禁未完整产出：</span>
+                    <span className="text-muted-foreground">
+                      {r.securityStatus.vulnerabilities === "failed" && " CVE 扫描失败（无结果）"}
+                      {r.securityStatus.vulnerabilities === "skipped" && " CVE 扫描未执行（非 npm 项目）"}
+                      {r.securityStatus.bundleSize === "failed" && " 体积检测失败（无结果）"}
+                      {r.securityStatus.bundleSize === "skipped" && " 体积检测未执行（非 npm 项目）"}
+                      {" —— 下方数字不代表「没有问题」，只代表「没查出来」。请查看服务端日志。"}
+                    </span>
+                  </div>
+                )}
 
               {r.vulnerabilities && (
                 <div className="mb-6">
@@ -316,7 +391,7 @@ export default function TaskDetailPage() {
                             <th className="h-10 px-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground w-[90px]">版本</th>
                             <th className="h-10 px-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground w-[70px]">严重度</th>
                             <th className="h-10 px-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">漏洞</th>
-                            <th className="h-10 px-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground w-[110px]">影响范围</th>
+                            <th className="h-10 px-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground w-[110px]">中招版本</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/30">
@@ -324,7 +399,11 @@ export default function TaskDetailPage() {
                             <tr key={i} className="hover:bg-muted/50 transition-colors">
                               <td className="h-10 px-4 font-mono text-xs text-muted-foreground truncate max-w-[180px]">
                                 {v.package}
+                                {v.isDev && <span className="ml-1 text-muted-foreground/70">（dev）</span>}
                                 {!v.isDirect && <span className="ml-1 text-muted-foreground/70">（传递）</span>}
+                                {addedDeps.has(v.package) && (
+                                  <span className="ml-1 inline-flex h-5 px-1.5 items-center rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-xs font-medium">新增</span>
+                                )}
                               </td>
                               <td className="h-10 px-4 font-mono text-xs text-muted-foreground">{v.version}</td>
                               <td className="h-10 px-4">
@@ -350,7 +429,7 @@ export default function TaskDetailPage() {
               {r.bundleSize && (
                 <div>
                   <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">依赖体积</h3>
-                  <p className="text-sm text-muted-foreground">
+                  <div className="text-sm text-muted-foreground">
                     顶层依赖 {r.bundleSize.packageCount} 个 · 总体积{" "}
                     <strong className="text-foreground">{formatBytes(r.bundleSize.totalBytes)}</strong>{" "}
                     {r.bundleSize.exceeded ? (
@@ -367,7 +446,20 @@ export default function TaskDetailPage() {
                         最大单包 {r.bundleSize.largest.name} {formatBytes(r.bundleSize.largest.bytes)}
                       </span>
                     )}
-                  </p>
+                  </div>
+
+                  {/* U8：查询失败的包此前被静默丢掉 → 「未超阈值」可能只是「没查全」 */}
+                  {r.bundleSize.incomplete && (
+                    <div className="mt-2 text-sm">
+                      <span className="text-amber-700 dark:text-amber-300">
+                        ⚠️ 共查询 {r.bundleSize.queriedCount} 个包，其中 {r.bundleSize.failedCount} 个查询失败未计入
+                      </span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        —— 上面的总体积**偏低**，「未超阈值」不等于「真的没超」。
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

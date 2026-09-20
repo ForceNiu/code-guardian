@@ -160,7 +160,7 @@ src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Dif
 tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
 scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
 fixtures/          演示用 git 仓库
-docs/              产品文档 · 架构文档 · 前端设计说明 · reports/（历史审查与验证结论）
+docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发须知(DEVELOPING: 红线/方法论/文件地图) · 审计台账(AUDIT-BACKLOG)；历史报告已移出本仓库
 .github/           CI（lint → typecheck → test → build 四道门禁，单 job）
 ```
 
@@ -234,7 +234,23 @@ docs/              产品文档 · 架构文档 · 前端设计说明 · reports
 - **幂等不用自己写**：唯一索引 `(repoId, mrId, commitSha)` 兜住，重复触发由 `enqueueTask` 捕获 P2002 返回 `duplicate`。
 - 签名校验现状：GitLab 比对 `x-gitlab-token`，GitHub 比对 `x-hub-signature-256`（`timingSafeEqual` 防时序侧信道）。
 
-> 🔴 以上任一处改动都动到了**判定逻辑**或**外部调用**，因此收尾固定跑四道门禁 + 一次全链路复跑（见 [`docs/DEVELOPING.md`](docs/DEVELOPING.md) 的红线；复跑记录见 [E2E-RERUN-2026-09-17](docs/reports/E2E-RERUN-2026-09-17.md)）。
+> 🔴 以上任一处改动都动到了**判定逻辑**或**外部调用**，因此收尾固定跑四道门禁 + 一次全链路复跑（见 [`docs/DEVELOPING.md`](docs/DEVELOPING.md) 的红线）。
+
+---
+
+## 已知边界（判读报告时必读）
+
+报告里的数字各有口径，读错口径会得出相反结论。三条最容易踩的：
+
+| 报告显示 | 真实含义 | 常见误读 |
+| :--- | :--- | :--- |
+| 影响链路 **0 条** | **对外接口层面**没检测到变化 | ❌ 误读成「这次改动没影响」——引擎**不解析函数体内部逻辑**，返回值/副作用变了但签名没动，看不到 |
+| 体积 `incomplete` | 部分依赖体积查询失败，`totalBytes` **偏小** | ❌ 误读成「体积没超标」——要看「查询 N / 失败 M」 |
+| 安全门禁 `failed` | 查询本身失败，结果**不可信** | ❌ 误读成「没有漏洞」——UI 会显示失败警示，不会留白 |
+
+解析失败会按 `syntax`（你的代码错了）/ `unsupported`（我们不支持，如装饰器）/ `empty`（空文件）分类上报，不再静默；`unsupported` 不为 0 意味着有文件根本没被解析，影响面是空白。
+
+完整口径见 [docs/product.md §10 已知边界](docs/product.md#10-已知边界判读报告前必读)。
 
 ---
 
@@ -245,12 +261,9 @@ docs/              产品文档 · 架构文档 · 前端设计说明 · reports
 | 能力全貌 / 环境变量 / 脚本 | 本文件 README.md |
 | 改代码前必读：红线 / 方法论 / 文件地图 | [docs/DEVELOPING.md](docs/DEVELOPING.md) |
 | 架构设计与规则口径 | [docs/architecture.md](docs/architecture.md) |
-| 产品定位与使用场景 | [docs/product.md](docs/product.md) |
-| 前端视觉设计原则 | [docs/frontend-redesign.md](docs/frontend-redesign.md) |
-| 历史审查结论 | [docs/reports/CODE_REVIEW_REPORT.md](docs/reports/CODE_REVIEW_REPORT.md) |
-| 端到端验证记录 | [docs/reports/E2E-VERIFICATION-2026-09-16.md](docs/reports/E2E-VERIFICATION-2026-09-16.md) |
-| 端到端复跑记录（引擎大改后） | [docs/reports/E2E-RERUN-2026-09-17.md](docs/reports/E2E-RERUN-2026-09-17.md) |
+| 产品定位与使用场景 + 已知边界 | [docs/product.md](docs/product.md) |
 | 审计待办台账（审计清单的唯一归属地） | [docs/AUDIT-BACKLOG.md](docs/AUDIT-BACKLOG.md) |
+| 历史审查 / 全链路复跑报告（2026-09-16 ~ 09-19） | **已移出本仓库**，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/` |
 
 ---
 

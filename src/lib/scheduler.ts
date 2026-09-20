@@ -149,7 +149,7 @@ async function processTask(task: Task, ctrl: { cancelled: boolean }) {
     await enrichUncertain(output.result);
 
     // M5：安全门禁（CVE 扫描 + 构建体积检测），失败静默降级、不阻断主分析
-    await enrichSecurity(output.result, workdir);
+    await enrichSecurity(output.result, workdir, task.baseRef, task.headRef);
 
     await prisma.task.update({ where: { id: task.id }, data: { status: "reporting" } });
     getEventBus().publish(task.id, { status: "reporting" });

@@ -107,6 +107,22 @@ export interface Vulnerability {
   vulnerableVersions: string; // 受影响版本范围，如 "<4.17.21"
   cvssScore?: number;
   isDirect: boolean; // 是否项目顶层直接依赖
+  /** U7(b)：是否仅 devDependencies（不参与运行时漏洞，但会出现在依赖树里） */
+  isDev?: boolean;
+}
+
+/** U6(b)：本次 PR 改动 package.json 的依赖变化情况（与「全仓体检」区分开） */
+export interface DepChange {
+  name: string;
+  from?: string; // base 侧声明版本（added 时无）
+  to?: string; // head 侧声明版本（removed 时无）
+  kind: "added" | "upgraded" | "downgraded" | "removed";
+  isDev: boolean; // 该依赖是否仅 devDependencies
+}
+export interface DepChanges {
+  /** "ok" = 成功比对 base/head；"unknown" = 基线不可读 / 无 git / 无 ref，无法比对 */
+  status: "ok" | "unknown";
+  changes: DepChange[];
 }
 
 /** M5 构建体积检测：依赖体积报告 */
@@ -117,6 +133,12 @@ export interface BundleSizeReport {
   thresholdBytes: number; // 总依赖体积门禁阈值
   exceeded: boolean; // 是否超过总阈值
   packages: { name: string; version: string; bytes: number }[]; // 明细（按体积降序）
+  // ↓ U8（2026-09-19）：查询失败的可见化。此前失败的包记 bytes:0 后被 filter 丢掉 →
+  //   totalBytes 少算、packageCount 只数成功的，且**无任何提示**，
+  //   报告上「未超阈值」可能只是「压根没查全」。老任务的 result 无这些字段，故全部可选。
+  queriedCount?: number; // 本次实际查询的包总数
+  failedCount?: number; // 查询失败（非 2xx / 超时 / 网络异常）的包数
+  incomplete?: boolean; // failedCount > 0 → 数据不完整，门禁结论不可全信
 }
 
 /** Worker 输出的完整分析结果 */
@@ -130,12 +152,35 @@ export interface AnalysisResult {
   vulnerabilities?: Vulnerability[];
   /** M5 构建体积检测：依赖体积（扫描失败/无 package.json 时为 undefined） */
   bundleSize?: BundleSizeReport;
+  /**
+   * U9（2026-09-19）：安全门禁各环节的执行状态，让「没产出」在报告页**看得见**。
+   * 此前 CVE / 体积任一失败都只 console.error（只有服务端日志能看到），
+   * 而 UI 是 `{r.vulnerabilities && (...)}` → 失败时整块不渲染，
+   * 读者只能靠「怎么少了一块」去反推。老任务的 result 无此字段，故可选。
+   * - "ok"      ：有产出
+   * - "failed"  ：跑了但失败
+   * - "skipped" ：非 npm 项目（无 package.json），未跑
+   */
+  securityStatus?: {
+    vulnerabilities: "ok" | "failed" | "skipped";
+    bundleSize: "ok" | "failed" | "skipped";
+    /** U6(b)：本次 PR 对 package.json 的依赖改动（仅成功比对 base/head 时存在） */
+    depChanges?: DepChanges;
+  };
   summary: {
     totalFiles: number;
     totalSymbols: number;
     changedFileCount: number;
     changedSymbolCount: number;
     cacheHits: number; // 本次分析命中增量缓存（跳过 parse）的文件数
+    /**
+     * U5（2026-09-19）：解析失败按原因计数。
+     * "unsupported" = **我们的能力边界**（没开对应插件：装饰器 / 新语法）
+     * "syntax"      = 用户代码本身有语法错误
+     * "empty"       = 空文件
+     * 三者此前一律静默返回空数组，在报告上长得一模一样。空对象 {} 表示全部解析成功。
+     */
+    parseFailures?: Record<string, number>;
     high: number;
     medium: number;
     low: number;
