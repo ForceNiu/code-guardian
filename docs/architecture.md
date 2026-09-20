@@ -6,7 +6,7 @@
 
 ## 1. 一句话定位
 
-ESLint 查不出变量污染、Code Review 人工太慢。本平台在 MR 合并前，用 **AST 增量分析 + 反向索引** 自动算出影响链路，再叠加 **确定性规则引擎（80%）+ AI 语义引擎（20%）** 双轨给出门禁结论。
+ESLint 查不出变量污染、Code Review 人工太慢。本平台在 MR 合并前，用 **AST 增量分析 + 反向索引** 自动算出影响链路，再叠加 **确定性规则引擎 + AI 语义引擎双轨** 给出门禁结论（规则引擎覆盖绝大多数变更，`uncertain` 才送 AI）。
 
 ---
 
@@ -156,7 +156,7 @@ Webhook / 手动触发
 
 - **确定性规则引擎**（`worker/rules.cjs`，0 Token）：AST 硬规则捕获高风险变更，输出 `{ severity, confidence }` 三档（`proven`=自身即证据可直接门禁 / `heuristic`=经验判断需人工复核 / `uncertain`=归不了类交 AI）。规则覆盖函数签名 10 类、type/interface 字段 8 类、enum 成员 2 类、class 成员 5 类，共 **25 条查表规则**（`RULE_TABLE` 另含 `unknown` 兜底一项）。`renamed` / `removed` / `added` 是 diff 阶段的分支，不占 `RULE_TABLE` 条目。判据遵循 semver：删 / 收紧 = breaking（high），增 / 放宽 = 兼容（low）。
 - **AI 语义引擎**（`src/lib/ai/`，M3b）：规则引擎判为 `uncertain` 的变更才送入 LangGraph，管线 `问题重述 → 上下文检索 → 影响面预测 → 修复建议` 4 节点，用 DeepSeek 产出 severity/confidence/suggestion 并合并回 impactChain。AI 不可用（无 key / 调用失败）时静默降级，保留原 uncertain 结果，不影响任务成功。
-- **成本**：80% 由规则搞定，AI 只覆盖 20%，月 Token 可控在 $200 内。
+- **成本**：绝大多数变更由 0 Token 的确定性规则引擎搞定，仅 `uncertain` 才送 AI，成本随 `uncertain` 变更数线性增长。
 
 ---
 

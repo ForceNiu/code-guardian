@@ -257,7 +257,7 @@ export default function TaskDetailPage() {
                 <span className="font-medium text-amber-700 dark:text-amber-300">⚠️ 部分文件未能解析：</span>
                 <span className="text-muted-foreground">
                   {r.summary.parseFailures.unsupported
-                    ? ` ${r.summary.parseFailures.unsupported} 个含暂不支持的语法（如装饰器）`
+                    ? ` ${r.summary.parseFailures.unsupported} 个含暂不支持的语法（如 pipeline 运算符）`
                     : ""}
                   {r.summary.parseFailures.syntax
                     ? ` ${r.summary.parseFailures.syntax} 个存在语法错误`

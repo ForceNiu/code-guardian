@@ -175,7 +175,7 @@ export interface AnalysisResult {
     cacheHits: number; // 本次分析命中增量缓存（跳过 parse）的文件数
     /**
      * U5（2026-09-19）：解析失败按原因计数。
-     * "unsupported" = **我们的能力边界**（没开对应插件：装饰器 / 新语法）
+     * "unsupported" = **我们的能力边界**（没开对应插件：pipeline 运算符 / 新语法）
      * "syntax"      = 用户代码本身有语法错误
      * "empty"       = 空文件
      * 三者此前一律静默返回空数组，在报告上长得一模一样。空对象 {} 表示全部解析成功。
