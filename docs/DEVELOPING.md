@@ -26,8 +26,8 @@ npm run scan ../interview-forge main~20 main
 npm run scan . main~5 main            # 扫自己
 ```
 
-**注意**：`npm test` 里 `.cjs` 用例必须纳入（`tests/*.test.cjs`），只统计 `.ts` 会漏掉两个
-引擎测试文件（历史上因此误判过「核心引擎零测试」）。
+**注意**：`npm test` 里 `.cjs` 用例必须纳入（`tests/*.test.cjs`），只统计 `.ts` 会漏掉**三个**
+引擎测试文件（`analyze-core` / `analyze-worker` / `rules`；历史上因此误判过「核心引擎零测试」）。
 
 **三种粒度的验证不要混用**：
 - `npm run scan` 验「**引擎**对不对」—— 绕开 DB / HTTP，**零 AI 成本**，走 worker；
@@ -48,7 +48,7 @@ npm run scan . main~5 main            # 扫自己
 | 现象 | 结论 | 依据 |
 | :--- | :--- | :--- |
 | `prisma:error / Unique constraint failed on (repo_id, mr_id, commit_sha)` | ✅ **正常**。`enqueueTask` 靠「先插入 → 撞唯一键 → 捕获 P2002 → 返回 duplicate」实现幂等；Prisma 会把这次失败插入打到 stderr（**预期噪音**） | 同一次重复请求返回 `200 duplicate`、taskId 不变 |
-| `summary.cacheHits` 非 0（如 39） | ✅ **正常**。增量缓存命中未变更文件：`totalFiles − changedFileCount` 算术闭合 | 与历史口径一致 |
+| `summary.cacheHits` 非 0（如 39） | ✅ **正常**。缓存命中未变更文件（条件是「未变更 **且** 快照命中」）；**仅当每个未变更文件都命中**时才等于 `totalFiles − changedFileCount`，部分命中则小于该差值 | 与历史口径一致 |
 | 耗时比上一轮快 | ✅ **正常**。缓存命中 + 无 AI 往返（0 uncertain 输入） | 零 AI 往返比有往返快 |
 
 ---
@@ -76,8 +76,8 @@ npm run scan . main~5 main            # 扫自己
 9. **查 PR / CI 用 `gh`**（2026-09-20 更正 —— 旧版写「无 `gh` CLI」，**该结论是错的**）：
    `gh` 在 **`/opt/homebrew/bin/gh`**（v2.73.0），但**不在默认 `PATH`** → `which gh` 会报 not found，
    **所以不能用 `which` 判它是否存在**。此坑真实付过代价：据此连错两轮，把 PR #26/#27/#28
-   都推给了用户手动开。用绝对路径调用即可；它走 `api.github.com`，而本环境代理**只放行
-   `api.github.com`、拦 `github.com`** → `gh` 恰好是「push 被挡」时查 PR / CI 的可用通道。
+   都推给了用户手动开。用绝对路径调用即可；它走 `api.github.com`，而本环境对 `github.com`
+   则**时通时不通**（2026-09-20 实测：`git ls-remote`、`git push`、两次完整 PR 流程均走通）→ `gh` 是「push 被挡」时的备用通道。
    ```bash
    /opt/homebrew/bin/gh pr view <n>       # PR 状态
    /opt/homebrew/bin/gh pr checks <n>     # CI 结果
@@ -105,7 +105,7 @@ npm run scan . main~5 main            # 扫自己
     本仓库是 PUBLIC（被分析的 interview-forge / failwatch 同样 PUBLIC），所以内嵌别项目源码
     **不算泄漏**；真正要防的是：**`/Users/<用户名>` 绝对路径、内网 IP、localhost 端口、临时路径**。
     - **`docs/reports/` 下的原始 dump（`e2e-logs/`）与历史复跑报告** 均已移出本仓库（2026-09-19）：
-      原始 dump 本就 gitignore、不入库；5 份复跑/审计报告归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`，
+      原始 dump 本就 gitignore、不入库；`历史报告-移出/` 下 7 份（6 份复跑/审计报告 + `frontend-redesign.md`），
       结论由本文件 §1.1 / §1.2 承接 + `npm run scan` 可复跑）。
     - ⚠️ **排除某个文件/目录后，必须全仓 grep 它被引用的每一处** —— 曾漏掉 `README.md` 里指向它的链接
       → GitHub 上 404。改方案 = 改引用，两件事必须一起做。
@@ -189,7 +189,7 @@ docs/
   product.md           产品说明（+ §10 已知边界，判读报告前必读）
   AUDIT-BACKLOG.md     审计清单唯一归属地（做 / 不做 / 待定三态）—— **状态一变就改它**
   DEVELOPING.md        本文件（红线 / 方法论 / 文件地图）
-  # 注：历史审查 / 复跑报告（frontend-redesign.md、reports/ 下 5 份）
+  # 注：历史审查 / 复跑报告共 7 份（frontend-redesign.md、reports/ 下 6 份）
   # 已于 2026-09-19 移出本仓库，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`。
   # 其中成本口径与「看起来异常实际正常」备案已搬进本文件 §1.1 / §1.2。
 tests/
@@ -198,10 +198,10 @@ LICENSE                  MIT / Copyright (c) 2026 ForceNiu
 .github/workflows/ci.yml lint → typecheck → test → build 四道门禁
 ```
 
-> 🔴 **`worker/analyze.worker.cjs` 只被「运行时字符串路径」引用**（`src/lib/run-analysis.ts:23`、`scripts/scan-repo.cjs:38`），
+> 🔴 **`worker/analyze.worker.cjs` 只被「运行时字符串路径」引用**（`src/lib/run-analysis.ts` 的 `const workerPath`、`scripts/scan-repo.cjs` 的 worker 路径），
 > 不是 `import` —— 目的是让它既不进 Next bundle、也不被 Turbopack 改写。
 > **后果：改它的文件名 / 目录名不会有任何编译期报错，只在运行时挂（或更坏：静默跑到旧路径）。**
-> 同步点**共 4 处**（只算「改这个文件名/目录名就必须跟着改」的）：上面两个字符串 + `tests/analyze-worker.test.cjs:20`（构造）+ `tests/run-analysis.test.ts:93`（断言）。
+> 同步点**两个口径别混**：**只改 `analyze.worker.cjs` 文件名** = **4 处**（上面两个字符串 + `analyze-worker` 测试的构造 + `run-analysis` 测试的断言，全是运行时字符串）；**改 `worker/` 目录名** = **9 处**（再加上 `tsconfig.json` 的 `exclude`、3 个 `.cjs` 的静态 `import` / 别名引用等；全表见 `AUDIT-BACKLOG.md` §一）。⚠️ **一律用命令穷举，别数行号**：`grep -rn 'analyze\.worker\.cjs' --include='*.ts' --include='*.cjs' --include='*.json' .`
 > 固定判据：`npm run scan <仓库> <base> <head>` 与基线数字逐项对齐（`analyze-worker.test.cjs` 真起 Worker 线程）。
 
 ---
@@ -218,4 +218,4 @@ LICENSE                  MIT / Copyright (c) 2026 ForceNiu
   （本地只能用「把包挪走」近似验证）。所以「必须开 PR 触发 CI」是**实质必要**，不是形式主义。
 - **合并前四重复核 + 合并后抽验**：`state=open` + `mergeable_state=clean` + CI 全绿 +
   `PUT /merge` 带 `sha` 锁定被审查过的那个 SHA；合并后还要用 `git ls-tree origin/main` 查关键文件在不在、
-  `--is-ancestor` 确认快进关系 —— **别只信 API 回的那句「merged」**。
+  `git diff --stat <分支head> origin/main` 输出为空（**squash 后不能用 `--is-ancestor`，恒为假**）—— **别只信 API 回的那句「merged」**。

@@ -20,7 +20,7 @@ export function runAnalysis(input: WorkerInput): Promise<WorkerOutput> {
     //    既不进 Next/Turbopack 的 bundle，也不参与 tsc 的类型检查（它是 .cjs）。
     //    代价：静态工具看不出这个文件在被使用 → 改路径 / 目录名不会有任何编译期报错，
     //    只在运行时挂。同步点共 4 处（口径与 docs/DEVELOPING.md §4 一致，别写成「3 处」）：
-    //    本行、scripts/scan-repo.cjs:38、tests/analyze-worker.test.cjs:20（构造）、tests/run-analysis.test.ts:93（断言）。
+    //    本文件的 `const workerPath`、`scripts/scan-repo.cjs` 的 worker 路径、两个测试文件（构造 + 断言）。⚠️ 故意不写行号（会漂）——用 `grep -rn 'analyze\.worker\.cjs'` 穷举。
     const workerPath = path.join(process.cwd(), "worker", "analyze.worker.cjs");
     const worker = new Worker(workerPath, { workerData: input });
 

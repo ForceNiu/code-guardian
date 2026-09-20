@@ -36,7 +36,7 @@
 | 场景 | 入口 | 结果 |
 | :--- | :--- | :--- |
 | MR 自动审查 | GitLab MR / GitHub PR / push Webhook 自动触发 | 分析完成后回写 commit status（红绿灯），作为合并门禁 |
-| 手动即时分析 | 首页粘贴仓库地址 + base/head ref | 直接生成影响链路报告，无需配 Webhook |
+| 手动即时分析 | 首页粘贴仓库地址 + base/head ref + 访问口令 | 直接生成影响链路报告，无需配 Webhook（口令 = `MANUAL_TRIGGER_TOKEN`，未配置则接口返回 503） |
 | 依赖安全体检 | 分析流程自动附带 | 报告页「安全门禁」卡片展示 CVE 漏洞 + 体积门禁 |
 
 ---
@@ -46,7 +46,7 @@
 | 能力 | 说明 |
 | :--- | :--- |
 | 多源 Webhook | `POST /api/webhook` 幂等入队，适配 GitLab MR / GitHub push / GitHub PR，唯一索引防重 |
-| 手动触发 | 首页粘贴仓库地址 + base/head ref 即可分析 |
+| 手动触发 | 首页粘贴仓库地址 + base/head ref + 访问口令（`x-manual-trigger-token`；未配 `MANUAL_TRIGGER_TOKEN` 时接口返回 503） |
 | AST 分析引擎 | `@babel/parser` + `@babel/traverse`，跑在 `worker_threads` 里，不阻塞主线程 |
 | 导出符号提取 | 解析 `export` 得到每个文件的导出函数/变量，支持任意历史提交当 head 对比 |
 | 跨文件引用追踪 | 反向索引表：每个符号存「谁引用它」→ 改一个函数立刻知道影响范围 |
