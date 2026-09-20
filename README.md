@@ -122,8 +122,12 @@ curl -X POST http://localhost:3000/api/webhook \
 
 ## 部署
 
-生产运行 = 一个 Next.js 服务器 + 一个 Postgres。**不需要 Redis、消息队列或额外的 worker 进程**——
+生产运行 = 一个 Next.js 服务器 + 一个 Postgres。**单实例部署下不需要 Redis、消息队列或额外的 worker 进程**——
 调度器随 `instrumentation.ts` 在应用启动时自动拉起（5s 轮询，并发上限 3），分析跑在进程内的 `worker_threads` 里。
+
+> ⚠️ 上句的「**单实例**」是硬前提：SSE 进度推送走的是**进程内**事件总线（`src/lib/events.ts`，EventEmitter 挂 `globalThis`）。
+> 横向扩到**多实例 / Serverless** 后，跨实例订阅失效——浏览器可能一直收不到进度更新（任务本身仍会跑完，可刷新看结果），
+> 届时需把它换成 Redis pub/sub。这是已知边界，登记见 `docs/AUDIT-BACKLOG.md`（D11）。
 
 ```bash
 npm ci

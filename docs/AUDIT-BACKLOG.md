@@ -91,7 +91,7 @@
 | # | 发现（含代码位置） | 处理 |
 |---|---|---|
 | **S1** | 全仓 18 条 markdown 本地链接里**唯一失效**：`docs/reports/E2E-VERIFICATION-2026-09-16.md:7` 写 `](DEVELOPING.md)`，该文件在 `docs/reports/` 下 → 应 `](../DEVELOPING.md)`。**是同类事故（`README.md:169` 漏改）的残留** | ✅ 已修 |
-| **S2** | README 扩展指南 §3 写「`adaptWebhook` 的 **switch** 挂上」，实为**三元链**（`src/lib/webhook-adapters.ts:174-179`） | ✅ 已修 |
+| **S2** | README 扩展指南 §3 写「`adaptWebhook` 的 **switch** 挂上」，实为**三元链**（`src/lib/webhook-adapters.ts` 的 `adaptWebhook`，2026-09-20 现位于 `:176-181` —— 原引 `:174-179`，因上方注释增 2 行而下移） | ✅ 已修 |
 | **S3** | `src/worker/` 是**混合生命周期目录**（边界只靠 `tsconfig.exclude` + 一行注释维持，目录本身看不出） | ✅ 已修（重构，见下） |
 | **S4** | **文档数字互相矛盾且与代码不符**：`architecture.md:79,155` + `product.md:53,110` 写「27 条查表规则」，README 写「25 条 + `unknown` 兜底」。实测 `RULE_TABLE` = **25 条具名 + `unknown`**（函数 10 / 字段 8 / enum 2 / class 5） | ✅ 已修（四处统一为「25 条 + 兜底」） |
 | **S5** | `docs/DEVELOPING.md` 文件地图两处过期：`scheduler.ts` 标「⚠️ 零单测」（实际 **13 条**，含 7 个 fake）、`tests/` 写「10 个文件」（实际 **17 个**） | ✅ 已修 |
@@ -289,6 +289,63 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 |---|---|---|
 | C1 | §四.1 GitLab Commit Status 回写验证 | ✅ 关闭为「外部依赖，当前环境不可验」（缺 token + 真实项目，非代码缺陷） |
 | C2 | §四.2 AI 引擎真实仓库可达性 | ✅ 已如实写进文档（`product §10.4` + README 边界表）：真实语料 0 `uncertain` → AI 不触发，属预期；不补样本 |
+
+#### D 组 · ✅ 补验已跑完并收口（2026-09-20）
+
+> **来源**：§二.18 的 9 条「未验项」+ 清点时新发现的**两处无归属口子**（U4(c) `.vue`、`src/lib/events.ts:6` 的多实例 TODO）。
+> **终结形态**：`✅ 已验/已定` 或 `⛔ 不做（必须写理由）`。
+> ⚠️ **编号空间**：本组 `D1–D11` 是**新编号**，与旧 §二 里的 `D2`（Monaco）/ `D4`（超时）**无关**；凡引用旧编号一律写「§二.x」。
+> ✅ **收口结论（2026-09-20）**：本轮验出的 2 个真缺陷（① 同仓库并发未串行化 / ② Monaco 仍依赖 CDN）**经用户判定均非阻塞 → 不修，已转 §三「明确不做」**；
+> 其余 9 条全部拿到终态（7 条实测 + 2 条文档声明，见下表 D9 / D11）。**本组无遗留活口。**
+
+| 新号 | 事项 | 原出处 | 怎么验（判据） | 终态 |
+|---|---|---|---|---|
+| D1 | 并发上限 = 3 | §二.18 · B3 | 连发 5 个任务，观察是否只跑 3 个 | ✅ **已验**：实测最大并发 **3**（5 任务 → 3 跑 / 2 排队 → 依次补位）。⚠️ 副作用暴出缺陷 ① |
+| D2 | 超时取消 → `failed` 态 | §二.18 · B4 | 造一个 `baseRef` 不可达的任务 | ✅ **已验**：约 6s 落 **`failed`**，`errorMessage = git diff 失败：baseRef/headRef 不可达，请检查引用` |
+| D3 | `FileSnapshot` 缓存命中 | §二.18 · D2 | ⚠️ **原判据无效，已改写**（见下） | ✅ **已验**：`base == head`（0 变更）→ **`cacheHits: 7 / totalFiles: 7`** |
+| D4 | `github-push` 事件源 | §二.18 | 补一份 push payload（含 `before` / `after` / `ref`） | ✅ **已验**：合法签名 → `201` + `"source":"github-push"`；错签名 → `401`；结构非法 → `400` |
+| D5 | webhook 无事件头兼容路径 | §二.18 | 发不带 `X-GitHub-Event` / `X-Gitlab-Event` 的请求 | ✅ **已验**：`201 created`（统一格式路径通）；错 token → `401` |
+| D6 | `npm run seed` / `create-fixture.sh` | §二.18 | 跑一次官方脚本，确认能复现 `fixtures/sample-repo` | ✅ **已验**：干净复现（2 commit / 9 文件 / 退出码 0） |
+| D7 | 渲染层截图（详情页五块） | §二.18 | 用无头浏览器对内容块逐块截图 | ✅ **已验**：8 个内容块全部截到并逐张看过（`~/WorkBuddy/AI/cg-screenshots/d7-2026-09-20/`）。⚠️ 暴出缺陷 ② |
+| D8 | Monaco 离线化（旧「D4」） | §二.2 / §二.18 | 明确终态 | 🔴 **不是「不做」，是「没做干净」** → 缺陷 ② |
+| D9 | fork 仓库 PR | §二.18 | 明确：是否维持「M2 已知边界」 | ✅ **已做**（2026-09-20）：`webhook-adapters.ts:144-147` 已改为**如实声明**「只支持同仓 PR，不支持 fork PR」，并写明后果（`head.sha` 不在目标仓库 → `git checkout --force` 不可达 → 任务落 `failed`，属「响的」失败）。**不再挂「待补齐」** |
+| D10 | 支持 `.vue`（= U4(c)） | §二.12 · U4 | 明确：立独立项 / ⛔ + 理由 | ✅ **已定**：维持**范围外**（A1 已声明，`README.md:250` + `:253`）。理由：拆 `<script>` + 行号偏移 + 模板引用属大工程，与「TS/JS 栈影响链路」定位不符 |
+| D11 | `events.ts` 多实例 TODO | 清点新发现 | 登记进「已知边界」/ ⛔ + 理由 | ✅ **已做**（2026-09-20）：`README.md` 部署节已补声明 —— 「不需要 Redis」以**单实例**为前提（SSE 走进程内事件总线，挂 `globalThis`），多实例 / Serverless 下跨实例订阅失效，需换 Redis pub/sub |
+
+**D3 判据修正（重要）**：§二.18 原写「同仓库同 commit 跑两次，看第二次是否命中」——**这条判据本身无效**。
+`cacheHits` 只统计**不在 `base...head` diff 里**的文件；而 `fixtures/sample-repo` 的 MR 改动了**全部 7 个源文件**，所以任何一次跑都必然是 `cacheHits: 0`（实测两次都是 0，不是缓存坏了）。
+✅ 正确判据 = **令 `baseRef == headRef`**（0 变更文件）→ 7 个文件全走「未变更」分支 → 实测 **`cacheHits: 7`**，缓存机制成立。
+
+#### D 组结论 · 暴出的 2 个真缺陷（**已转 §三「明确不做」**）
+
+**缺陷 ① 🔴 同仓库并发任务会因唯一约束竞态被误判 `failed`**
+- 现象：多个任务并发跑**同一个仓库**时，实测**至少 1 个**落 `failed`：
+  `Invalid prisma.exportSymbol.createMany() ... Unique constraint failed on the fields: (repo_id, file_path, symbol_name)`。
+- 根因：`src/lib/persist.ts` 的 `persistSymbolTable` 是「同一事务内 `deleteMany` → `createMany`」；两个任务对同一 `repoId` 并发落库时事务交错 → 后者 insert 撞上前者刚写回的行。
+- 危害方向：**分析其实已经成功**（结果完整），任务却被标成 `failed` → 用户拿到一个「红着的、但其实有结果」的任务。
+- 复现（确定性）：同一 `gitUrl` 连发 3 个任务 → 必现（本轮两次运行分别 **2/5**、**1/3** 失败）。
+- 未登记：`DEVELOPING.md:49` 登记的是**另一张表**（`tasks` 的 `repo_id,mr_id,commit_sha` 幂等去重噪音），与本条无关。
+- **处置（2026-09-20）：判为 `won't fix`，不修** —— 见 §三 ①（含理由与回头条件）。若将来回头，候选修法：给**「workdir 使用 + 落库」整段**加按 `repoId` 的串行化（进程内 mutex / advisory lock），或把 `createMany` 换成 `upsert` 语义（`ON CONFLICT DO UPDATE`）。
+
+**缺陷 ② 🔴 Monaco 声称「本地打包、零 CDN」，实际仍从 jsdelivr 拉取**
+- 声明：`next.config.ts:18` 写「Monaco Editor 本地打包（2026-09-17）：消除 CDN 依赖，私有化部署合规」；`DiffViewer.tsx:4` 写「零 CDN 依赖」。
+- 实测：详情页加载时浏览器**实际发出 15 个站外请求**，全部指向
+  `https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/...`（`loader.js` / `editor.main.js` / `workers-*.js` / `ts.worker-*.js` 等）。
+- 根因：本地化靠的是 `next.config.ts` 的 **`webpack:` 钩子 + `MonacoWebpackPlugin`**，只在 **Webpack** 下执行；本项目 dev 跑 **Turbopack**（`next.config.ts:15` 亦显式配置了 `turbopack`）→ 插件不生效 → 回落 `@monaco-editor/react` 默认的 CDN loader。
+- 附带问题：CDN 拉的是 **0.55.1**，与 `package.json` 固定的 `monaco-editor@0.52.2` **不是同一版本**。
+- 危害方向：**离线 / 私有化部署下「代码 Diff」块会一直停在 `Loading...`**（首次截图即为此形态）——恰是这条修复想解决的问题没解决。
+- ✅ **生产路径已验（`next build` 跑完，7m40s；构建头打印 `▲ Next.js 16.3.4 (Turbopack)`）**：
+  产物里**没有** `.next/static/monaco/` 目录、**没有任何**文件名含 monaco 的本地资源；而
+  `.next/static/chunks/0rf3dcgsvz-zb.js` **内嵌了 `cdn.jsdelivr.net/npm/monaco-editor` 这个地址**。
+  → **dev 与 build 两条路径都依赖 CDN**，`next.config.ts:18` 那句「零 CDN 依赖 / 私有化部署合规」整体不成立。
+- **处置（2026-09-20）：判为 `won't fix`，不修；两处假注释已改为如实描述**（`next.config.ts` §顶部 + `DiffViewer.tsx`）—— 见 §三 ②。
+  若将来回头（离线 / 内网部署），候选修法：① 给 Turbopack 配等效的静态资源规则；② 改用 `@monaco-editor/react` 的
+  `loader.config({ monaco })` 显式喂本地 `monaco-editor`（`vs/` 自托管到 `public/`）。
+  无论走哪条，都应补一条**产物级防线**：构建后断言产物里不得出现 `cdn.jsdelivr.net`（防回归）。
+
+**另一条观察（非缺陷，但该知情）**：`uncertain` 变更交给 DeepSeek 判定后，**同一输入两次运行的 severity 可能不同**
+- 证据：同仓库同 base/head 连跑两次，7 条 AI 判定的变更里 `home.tsx#HomePage` 一次 `medium`、一次 `high`（其余 8 条完全一致）；日志 `[AI] uncertain 变更 7 条已由 AI 语义引擎判定完成` 两次均出现。
+- 性质：`semantic-graph.ts` 规定 AI 的 `confidence` 只能是 `heuristic` / `uncertain`，故这是 **LLM 固有抖动**，不是规则引擎缺陷；但**首页高危/中危计数会在两次运行间变化**，值得在已知边界里写明。
 
 ### 0. ✅ 收口分支 `fix/audit-tier1-3` —— **已合并**（main = `30c7dbb`）
 
@@ -753,7 +810,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | `npm run seed` / `create-fixture.sh` | 该轮 fixture 是手工造的 | 跑一次官方脚本，确认能复现 `fixtures/sample-repo` |
 | 渲染层截图 | 无 UI 断言手段 | 至少对详情页五块各截一张（hydration 已于 2026-09-19 用真实浏览器验过） |
 | Monaco 离线化（D4） | 与那轮范围无关 | 台账既有条目 §二.2 |
-| fork 仓库 PR | 代码注释声明为 M2 已知边界 | M5 前补齐 |
+| fork 仓库 PR | 代码注释声明为 M2 已知边界 | ~~M5 前补齐~~ → **2026-09-20 更正为「如实声明为长期边界」**（M5 已交付但此项未纳入范围），见上方 D 组 D9 |
 
 > ⚠️ 另一条**口径自纠**（同报告 §8，一并记账避免重复判断）：文档口径「**25 规则**」**已自证（2026-09-19 核）** ——
 > `worker/rules.cjs` 的 `RULE_TABLE` 实际 = **25 个具名 label + `unknown` 兜底**（共 26 项），与 README / architecture / product 写的「25 条查表规则 + unknown 兜底」**一致**。
@@ -773,6 +830,10 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | **P2②** | `noUncheckedIndexedAccess` 未开 | 开了数组下标全变 `T \| undefined` → **大面积改动换理论收益** | 大规模重构时顺带评估 |
 | ~~**P2④**~~ | `docs/demo-ai-uncertain/` 占已跟踪 docs 的 83%（504K / 608K） | 完全不进构建产物，只影响 clone 体积（半兆以内） | ✅ **2026-09-18 已消解**：该目录（连同一个本地泄漏）整体移出仓库，见 §二.17 |
 | ~~**P2⑤**~~ | 生成器 `build-report.mjs` 放在 `docs/` 下 | 零功能影响。但**会误导人以为 `docs/` 是"只放产物"的目录** | ✅ **2026-09-18 已消解**：脚本随 P2④ 一并移出，`docs/` 下不再有脚本 |
+| **①** | **同一仓库的并发分析没有串行化** —— `processTask` 全程共用 `.cache/repos/<repoId>`，而 `worker/analyze.worker.cjs` 的 `checkoutHead` 就在它上面 `git checkout --force` | **非阻塞**。单次使用（触发一次分析 → 看报告）碰不到；只有**同一仓库 ≥2 个任务在分析窗口内重叠**时才触发，表现分两层：**响的**是 `persistSymbolTable` 的唯一约束报错 → 任务标红 `failed`（重试即可，且分析其实已经成功）；**不响的**是后一个任务的 `checkout` 换掉了前一个的工作区 → 前者可能读到**对方的代码树**，安静产出一份错位报告。修它要动 `scheduler.ts` 的认领逻辑或新增 repo 锁，**而并发场景难以稳定复现与断言** → 回归风险高于收益 | 要**多实例 / 高并发接入真实仓库**（同一仓库频繁突发触发）时 |
+| **②** | **Monaco 未真正本地打包，仍依赖 `cdn.jsdelivr.net`** —— `next.config.ts` 的 `webpack:` 钩子在 Turbopack 下不执行，而 dev 与 `next build` 都跑 Turbopack | **非阻塞**。有网时能正常渲染（实测约 20s），只是慢；**离线 / 内网部署**下「代码 Diff」块会一直停在 `Loading...`。另：CDN 拉的是 0.55.1，与 `package.json` 固定的 0.52.2 不同版本。**不修的理由**：报告主体（风险总览 / 影响链路 / 安全门禁 / 变更符号明细）全部不依赖它，受影响的只有 Diff 这一块的可用性；两处注释已改为如实描述 | 需要**离线 / 内网演示或部署**时（按 `loader.config({ monaco })` 或自托管 `public/monaco/vs` 修，并补产物级断言：构建产物中不得出现 `cdn.jsdelivr.net`） |
+
+> ⚠️ **口径自纠**：§二「D 组结论」里把缺陷 ① 描述成「`persistSymbolTable` 的唯一约束竞态」——**那条描述写窄了**（只写了"响的那一半"）。**以本表 ① 行为准**：真正需要串行化的是「workdir 使用 + 落库」整段。
 
 **已执行的 P2 项**：
 
@@ -796,3 +857,34 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 2. 新增条目必须写清**代码位置**（可 grep 到）与**为什么现在要做 / 不做**。
 3. `won't fix` 不是「以后做」的委婉说法。若哪天要回头，先确认「回头条件」是否真的发生了。
 4. 别把「习惯」（如 E4）写成待办 —— 它永远不会变成已完成。
+
+---
+
+## 六、❄️ 冻结声明（2026-09-20）
+
+**本台账自 2026-09-20 起冻结。** 冻结的含义**不是**「一个问题都没有」，而是：
+
+> **每一条已知项都有了归属** —— 要么已实现并有实测证据，要么明确判为 `won't fix`（写清理由 + 回头条件）。
+
+**为什么「零缺陷」不能当收工标准**（2026-09-20 这轮踩出来的）：
+
+台账里长期的 ✅ 一直是「**我看过代码、觉得没问题**」这个口径，**从没被"有一条可复现的实测命令"定义过**。
+结果是三处「写着已修、实际没生效」：
+
+| 位置 | 写着 | 实际 |
+|---|---|---|
+| §二.2 Monaco | 「本地打包，消除 CDN 依赖」 | Turbopack 不执行 webpack 插件 → 仍从 jsdelivr 拉 15 个文件 |
+| 并发控制 | 「信号量限 3 并发」 | 只控了"同时跑几个"，**没管"并发时数据对不对"**（→ §三 ①） |
+| §二.18 九条 | 「未验项」已记账 | 搬进台账后**一次没跑**；且 D3 的判据本身是错的 |
+
+→ **本台账此后只接受两种合法终态**：
+**① 有实测证据**（给得出可复现的命令或产物）；
+**② 明确声明为已知边界**（含触发条件 + 不做的理由）。
+**靠"看着没问题"写上去的 ✅ 一律不算数。**
+
+**冻结时的状态**：§二 A 组已合并 / B 组已关闭 / C 组已处置 / **D 组 11 条已全部收口**（D1–D7 七条实测；D8 判为缺陷 ② 并转 §三；D9 / D11 两条文档声明已补；D10 判为范围外）；**§二 之下无遗留活口**。
+§三 含两条本轮新增的 `won't fix`（① 同仓库并发未串行化、② Monaco 仍依赖 CDN，**均非阻塞**，理由与回头条件见该表）。
+
+**解冻条件**（只有两条，避免"再清点一遍"式的空转）：
+1. §三 里任一「**回头条件**」真实发生了；
+2. **或** 收到一条**可复现的新证据** —— 不是"我又看了一遍代码"。

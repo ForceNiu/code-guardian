@@ -15,7 +15,16 @@ const nextConfig: NextConfig = {
   turbopack: { root: __dirname },
   outputFileTracingRoot: __dirname,
 
-  // Monaco Editor 本地打包（2026-09-17）：消除 CDN 依赖，私有化部署合规
+  // ⚠️ Monaco「本地打包」——2026-09-20 实测**未生效**，此处如实记下，别被标题骗了。
+  //    原意（2026-09-17）：靠下面这段 webpack 钩子把 monaco 打进产物，消除 CDN 依赖。
+  //    但 dev 与 `next build` 都跑 **Turbopack**，而 Turbopack **不执行 webpack 插件** →
+  //    @monaco-editor/react 回落到它默认的 CDN loader：详情页实测发出 15 个站外请求到
+  //    `cdn.jsdelivr.net/npm/monaco-editor@0.55.1/...`（连版本都 ≠ package.json 固定的 0.52.2）。
+  //    影响：有网时约 20s 才渲染完；**离线 / 内网部署下「代码 Diff」块会一直停在 Loading...**。
+  //    决定：**暂不修**（非阻塞，报告主体不依赖它），登记见 docs/AUDIT-BACKLOG.md §三「明确不做」②。
+  //    若要修：给 Turbopack 配等效静态资源规则，或用 `loader.config({ monaco })` 喂本地实例，
+  //            并补一条产物级断言 —— 构建产物中不得出现 `cdn.jsdelivr.net`。
+  //    注：这段钩子保留，是因为若将来切回 webpack 构建它会重新生效；但在 Turbopack 下它是死代码。
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.plugins.push(

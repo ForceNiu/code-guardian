@@ -1,7 +1,10 @@
 "use client";
 
 // M4 Monaco Diff：变更文件的 base/head 两侧对比视图。
-// 用 @monaco-editor/react + monaco-editor-webpack-plugin 本地打包，零 CDN 依赖。
+// ⚠️ 2026-09-20 实测更正：**并非「零 CDN 依赖」**。Turbopack 下 next.config.ts 的 webpack 插件不生效，
+//    编辑器与 worker 实际从 `cdn.jsdelivr.net/npm/monaco-editor@0.55.1` 加载
+//    （理由与影响见 next.config.ts 顶部注释、决定见 docs/AUDIT-BACKLOG.md §三「明确不做」②）。
+//    后果：离线 / 内网部署时本组件会一直停在 loading；有网时首屏约 20s 才渲染。
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
