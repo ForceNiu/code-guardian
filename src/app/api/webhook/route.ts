@@ -4,6 +4,7 @@ import { enqueueTask } from "@/lib/enqueue";
 import {
   adaptWebhook,
   detectEvent,
+  safeEqual,
   verifyGitHubSignature,
 } from "@/lib/webhook-adapters";
 
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
   // ---- 已识别的平台事件：先校验签名，再适配 ----
   if (source) {
     if (source === "gitlab-mr") {
-      if (headers.get("x-gitlab-token") !== secret) {
+      if (!safeEqual(headers.get("x-gitlab-token") ?? "", secret)) {
         return NextResponse.json({ error: "invalid webhook token" }, { status: 401 });
       }
     } else if (!verifyGitHubSignature(secret, rawBody, headers.get("x-hub-signature-256"))) {
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- 无平台事件头：按统一格式向后兼容 ----
-  if (headers.get("x-gitlab-token") !== secret) {
+  if (!safeEqual(headers.get("x-gitlab-token") ?? "", secret)) {
     return NextResponse.json({ error: "invalid webhook token" }, { status: 401 });
   }
 

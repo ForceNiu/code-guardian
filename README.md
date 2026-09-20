@@ -111,7 +111,7 @@ npm run dev
 
 > ⚠️ `POST /api/webhook` 是**写端点且 fail-closed**（见下方「环境变量」）：**不配 `WEBHOOK_SECRET` 直接 503**，
 > 配了但**不带 `x-gitlab-token` 头**则 **401**。所以下面的 `-H "x-gitlab-token: …"` **不能省**——
-> 无平台事件头时走的是「统一格式」兼容路径，该路径**同样校验这个 token**（`src/app/api/webhook/route.ts:78`）。
+> 无平台事件头时走的是「统一格式」兼容路径，该路径**同样校验这个 token**（`src/app/api/webhook/route.ts:79`）。
 
 ```bash
 # 前置：.env 里已配 WEBHOOK_SECRET（未配则本接口整段返回 503）
@@ -246,7 +246,7 @@ docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发
 
 - `src/lib/webhook-adapters.ts` 四步：`WebhookSource` 加类型 → `detectEvent(headers)` 加识别 → 写 `adaptXxx(payload)` → 在 `adaptWebhook` 的**分派分支**里挂上（现为三元链，不是 switch）。
 - **幂等不用自己写**：唯一索引 `(repoId, mrId, commitSha)` 兜住，重复触发由 `enqueueTask` 捕获 P2002 返回 `duplicate`。
-- 签名校验现状：GitLab 比对 `x-gitlab-token`，GitHub 比对 `x-hub-signature-256`（`timingSafeEqual` 防时序侧信道）。
+- 签名校验现状：GitLab 比对 `x-gitlab-token`，GitHub 比对 `x-hub-signature-256`，手动触发比对 `x-manual-trigger-token`；**三处统一走 `safeEqual()`（`timingSafeEqual`）做常量时间比较**（P1-8 之前只有 GitHub 那处是常量时间，另两处是 `!==`）。
 
 > 🔴 以上任一处改动都动到了**判定逻辑**或**外部调用**，因此收尾固定跑四道门禁 + 一次全链路复跑（见 [`docs/DEVELOPING.md`](docs/DEVELOPING.md) 的红线）。
 

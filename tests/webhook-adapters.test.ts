@@ -7,6 +7,7 @@ import { createHmac } from "node:crypto";
 import {
   detectEvent,
   verifyGitHubSignature,
+  safeEqual,
   adaptGitLabMr,
   adaptGitHubPush,
   adaptGitHubPr,
@@ -135,4 +136,22 @@ test("非法 payload 返回 ok:false", () => {
   assert.equal(adaptGitHubPush({}).ok, false);
   assert.equal(adaptGitHubPr({ number: 1 }).ok, false);
   assert.equal(adaptWebhook("github-pr", "not json").ok, false);
+});
+
+// ---------------------------------------------------------------------------
+// P1-8：safeEqual 是三处 token 比对（GitLab webhook / 手动触发 / GitHub 签名）
+// 的统一口径，此前只有 GitHub 那处是常量时间。
+// ---------------------------------------------------------------------------
+
+test("safeEqual：相同字符串 → true", () => {
+  assert.equal(safeEqual("secret-token", "secret-token"), true);
+});
+
+test("safeEqual：等长但内容不同 → false", () => {
+  assert.equal(safeEqual("secret-token", "secret-tokeX"), false);
+});
+
+test("safeEqual：长度不等 → false（且不抛异常）", () => {
+  assert.equal(safeEqual("short", "much-longer-token"), false);
+  assert.equal(safeEqual("", "x"), false);
 });

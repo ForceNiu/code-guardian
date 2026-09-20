@@ -91,7 +91,7 @@
 | # | 发现（含代码位置） | 处理 |
 |---|---|---|
 | **S1** | 全仓 18 条 markdown 本地链接里**唯一失效**：`docs/reports/E2E-VERIFICATION-2026-09-16.md:7` 写 `](DEVELOPING.md)`，该文件在 `docs/reports/` 下 → 应 `](../DEVELOPING.md)`。**是同类事故（`README.md:169` 漏改）的残留** | ✅ 已修 |
-| **S2** | README 扩展指南 §3 写「`adaptWebhook` 的 **switch** 挂上」，实为**三元链**（`src/lib/webhook-adapters.ts` 的 `adaptWebhook`，2026-09-20 现位于 `:176-181` —— 原引 `:174-179`，因上方注释增 2 行而下移） | ✅ 已修 |
+| **S2** | README 扩展指南 §3 写「`adaptWebhook` 的 **switch** 挂上」，实为**三元链**（`src/lib/webhook-adapters.ts` 的 `adaptWebhook`，现位于 `:185-190`（2026-09-20 晚因新增 `safeEqual()` 再下移 9 行；此前 `:176-181`，原引 `:174-179`）） | ✅ 已修 |
 | **S3** | `src/worker/` 是**混合生命周期目录**（边界只靠 `tsconfig.exclude` + 一行注释维持，目录本身看不出） | ✅ 已修（重构，见下） |
 | **S4** | **文档数字互相矛盾且与代码不符**：`architecture.md:79,155` + `product.md:53,110` 写「27 条查表规则」，README 写「25 条 + `unknown` 兜底」。实测 `RULE_TABLE` = **25 条具名 + `unknown`**（函数 10 / 字段 8 / enum 2 / class 5） | ✅ 已修（四处统一为「25 条 + 兜底」） |
 | **S5** | `docs/DEVELOPING.md` 文件地图两处过期：`scheduler.ts` 标「⚠️ 零单测」（实际 **13 条**，含 7 个 fake）、`tests/` 写「10 个文件」（实际 **17 个**） | ✅ 已修 |
@@ -206,7 +206,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | 幂等防重 | `prisma/schema.prisma:59` | 唯一索引 `[repoId, mrId, commitSha]` |
 | 规则引擎 | `worker/rules.cjs:222-252` | **25 条具名 + `unknown` 兜底**（函数 10 / 字段 8 / enum 2 / class 5）；**仅 2 条 `heuristic`、仅 `unknown` 是 `uncertain`** |
 | AI 管线 | `src/lib/ai/semantic-graph.ts:230-239` | 4 节点 `restate → retrieve → predict → suggest`；**仅 `predict`/`suggest` 调 LLM**（每任务固定 2 次调用） |
-| 调度 | `src/lib/scheduler.ts:11-13` | 并发 **3** / 轮询 **5000ms** / 硬超时 **300000ms** |
+| 调度 | `src/lib/scheduler.ts:12-14` | 并发 **3** / 轮询 **5000ms** / 硬超时 **300000ms**（2026-09-20 晚因新增 `repo-cache` import 下移 1 行） |
 | 体积门禁 | `src/lib/security/bundle-size.ts:9,83` | **100MB**；**只查顶层直接依赖** |
 | 漏洞扫描 | `src/lib/security/cve-scan.ts:4,11,79` | 官方端点 `registry.npmjs.org/-/npm/v1/security/advisories/bulk`；提交**完整依赖树** + `isDirect` 标记 |
 | 增量缓存 | `src/lib/persist.ts:55,81` | 按文件内容 hash 存取 |
@@ -314,7 +314,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | D6 | `npm run seed` / `create-fixture.sh` | §二.18 | 跑一次官方脚本，确认能复现 `fixtures/sample-repo` | ✅ **已验**：干净复现（2 commit / 9 文件 / 退出码 0） |
 | D7 | 渲染层截图（详情页五块） | §二.18 | 用无头浏览器对内容块逐块截图 | ✅ **已验**：8 个内容块全部截到并逐张看过（`~/WorkBuddy/AI/cg-screenshots/d7-2026-09-20/`）。⚠️ 暴出缺陷 ② |
 | D8 | Monaco 离线化（旧「D4」） | §二.2 / §二.18 | 明确终态 | 🔴 **不是「不做」，是「没做干净」** → 缺陷 ② |
-| D9 | fork 仓库 PR | §二.18 | 明确：是否维持「M2 已知边界」 | ✅ **已做**（2026-09-20）：`webhook-adapters.ts:144-147` 已改为**如实声明**「只支持同仓 PR，不支持 fork PR」，并写明后果（`head.sha` 不在目标仓库 → `git checkout --force` 不可达 → 任务落 `failed`，属「响的」失败）。**不再挂「待补齐」** |
+| D9 | fork 仓库 PR | §二.18 | 明确：是否维持「M2 已知边界」 | ✅ **已做**（2026-09-20）：`webhook-adapters.ts:153-156` 已改为**如实声明**（2026-09-20 晚因新增 `safeEqual()` 下移 9 行）「只支持同仓 PR，不支持 fork PR」，并写明后果（`head.sha` 不在目标仓库 → `git checkout --force` 不可达 → 任务落 `failed`，属「响的」失败）。**不再挂「待补齐」** |
 | D10 | 支持 `.vue`（= U4(c)） | §二.12 · U4 | 明确：立独立项 / ⛔ + 理由 | ✅ **已定**：维持**范围外**（A1 已声明，`README.md:250` + `:253`）。理由：拆 `<script>` + 行号偏移 + 模板引用属大工程，与「TS/JS 栈影响链路」定位不符 |
 | D11 | `events.ts` 多实例 TODO | 清点新发现 | 登记进「已知边界」/ ⛔ + 理由 | ✅ **已做**（2026-09-20）：`README.md` 部署节已补声明 —— 「不需要 Redis」以**单实例**为前提（SSE 走进程内事件总线，挂 `globalThis`），多实例 / Serverless 下跨实例订阅失效，需换 Redis pub/sub |
 
@@ -368,7 +368,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | **AUD-3** | §二 C 组 C1 ＋ §四.1 | GitLab 回写「**外部依赖，当前环境不可验**」，回头条件「拿到 token + 真实项目」 | 仓库外 `E2E-RERUN-2026-09-19.md:130` 记 F2 = **L3**（假 GitLab 收到真实 POST + `PRIVATE-TOKEN` 头）= ✅ 真跑通 | ✅ **已更正为「已验（L3）」**（两处同步，原文划删除线保留）。📌 教训：判「不可验证」前先问它依赖的是**厂商**还是**协议** —— 依赖协议 → **造假服务即可验真，无需真账号** |
 | **AUD-4** | `docs/DEVELOPING.md:186` | 单测「**17 个文件**」 | 实测 **18**（`ls tests/*.test.* \| wc -l`；全仓测试文件仅存在于 `tests/`） | ✅ **已修**为 18 + 复测命令 + 「此数随开发增长」。⚠️ 同条 S5(`:97`) 曾把「10 个」改成「17」，**又过期了** —— 「写死数字必被同批改动顶掉」 |
 | **AUD-5** | `docs/product.md:112` | 「单元测试 **238 个**」 | 实测 **250**（18 个文件的 `^test(` 加总复算命中） | ✅ **已修**为 250 + 复测命令（原 hedge「此数随开发增长，用前复测」保留） |
-| **AUD-6** | `docs/architecture.md:173` | `enrichSecurity(result, workdir)` | 真实签名 **4 参**：`enrichSecurity(output.result, workdir, task.baseRef, task.headRef)`（`src/lib/scheduler.ts:152`） | ✅ **已修**为完整 4 参 |
+| **AUD-6** | `docs/architecture.md:173` | `enrichSecurity(result, workdir)` | 真实签名 **4 参**：`enrichSecurity(output.result, workdir, task.baseRef, task.headRef)`（`src/lib/scheduler.ts:188`，2026-09-20 晚因 P0-2 把 `findUnique` 移进 try 而下移 36 行） | ✅ **已修**为完整 4 参 |
 | **AUD-7** | `:777`（§二.17 表「G1 HTML 说明书」行） | 列 2 写 `docs/g1-spec.html` | **复核为非缺陷**：该表列 2 的表头是「**原位置（仓库内，已不存在）**」，同表其他行（`docs/learning/ROADMAP.md`）同理 → **它就是故意的历史路径，不是死链**，与 `:529` 也不矛盾 | ⛔ **不改**。⚠️ **本条是审计脚本的假阳性**（脚本把反引号路径一律当活引用）——记在此处，**避免下次又当新问题发现一遍** |
 | **AUD-8** | `docs/DEVELOPING.md:17` | 「四道门禁 —— 与 CI **完全一致**」 | `ci.yml` 里是裸 `npm run lint / typecheck / test / build`，**没有** `env -u NODE_OPTIONS`（该前缀只是沙箱本地需要，§2.7 自陈） | ✅ **已修**为「**同一套命令**（沙箱里额外加 `env -u NODE_OPTIONS`）」 |
 | **AUD-9** | `src/lib/run-analysis.ts:22` vs `docs/DEVELOPING.md:194` | 注释写「同步点共 **3 处**」；文档写「共 **4 处**」 | **两个数都对**（3 处把两个测试文件合并算 1；4 处拆开算），但并列会让人怀疑其一有错。**4 处的行号逐条核对全对** | ✅ **已统一**：代码注释改为「共 4 处」并列出 4 个位置，与 `DEVELOPING.md` §4 口径一致 |
@@ -397,7 +397,7 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 
 | 新号 | 位置 | 写的 | 实际 | 处置 |
 |---|---|---|---|---|
-| **AUD-12** | `README.md:110-119` | 「快速验证 Webhook 幂等」的 curl 示例 —— 只有 `-H 'Content-Type'`，**无任何鉴权头** | 当前代码下**照抄必失败**：`src/app/api/webhook/route.ts:42` 未配 `WEBHOOK_SECRET` → **503**；`:78` 无 `x-gitlab-token` → **401**（无事件头兼容路径**同样**校验该 token）。**且与本文件 `:140-141` / `:208-210` 的 fail-closed 声明自相矛盾** —— D5 fail-closed 改造（2026-09-16）之后示例没同步 | ✅ **已修**：补 `-H "x-gitlab-token: $WEBHOOK_SECRET"` ＋ 前置「必须先配 secret」声明 ＋ 期望码（201 created / 200 duplicate）＋ 真 MR 适配路径提示 |
+| **AUD-12** | `README.md:110-119` | 「快速验证 Webhook 幂等」的 curl 示例 —— 只有 `-H 'Content-Type'`，**无任何鉴权头** | 当前代码下**照抄必失败**：`src/app/api/webhook/route.ts:43`（2026-09-20 晚因新增 `safeEqual` import 下移 1 行） 未配 `WEBHOOK_SECRET` → **503**；`:78` 无 `x-gitlab-token` → **401**（无事件头兼容路径**同样**校验该 token）。**且与本文件 `:140-141` / `:208-210` 的 fail-closed 声明自相矛盾** —— D5 fail-closed 改造（2026-09-16）之后示例没同步 | ✅ **已修**：补 `-H "x-gitlab-token: $WEBHOOK_SECRET"` ＋ 前置「必须先配 secret」声明 ＋ 期望码（201 created / 200 duplicate）＋ 真 MR 适配路径提示 |
 | **AUD-13** | `README.md:19` ＋ `docs/product.md:53` | 「25 条查表规则 + `unknown` 兜底（函数签名/字段/**别名**/**重命名导出**/enum/class）」= **列了 6 类** | `RULE_TABLE`（`worker/rules.cjs:222-252`）实为 **4 类**：签名 **10** ＋ 字段 **8** ＋ enum **2** ＋ class **5** ＝ **25**。「别名」在 `rules.cjs:291-297` 是**复用字段级规则**、「重命名导出」是 `runRules:264` 的**内联分支** → **两者都不占条目**。与 `docs/architecture.md:157` 的精确口径**直接冲突** | ✅ **已修**：两处统一为「函数签名 10 类 / type·interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类」。复测：`rg '别名/重命名导出'` 应 **0 命中** |
 | **AUD-14** | `docs/architecture.md:194` | 「8 并发 + **单包失败静默跳过**；累计总体积 + 最大单包」 | **U8 修复前的旧口径残留**。`src/lib/security/bundle-size.ts:72-90` 明写「**不再静默**」：失败包计入 `failedCount` 并置 `incomplete`；报告页 `src/app/tasks/[id]/page.tsx:452-455` 出「共查询 N 个包，其中 M 个查询失败未计入」 | ✅ **已修**：「单包失败**不再静默**（U8，2026-09-19）—— 计入 `failedCount` 并置 `incomplete`，报告页显式提示」。复测：`rg '单包失败静默跳过'` 应 **0 命中**。<br>🔴 **为什么这条最要紧**：它把**已经修好的防线说成「会少报、而且不提示」**，正撞本项目红线「致命缺陷全在少报方向」 |
 | **AUD-15** | `README.md:73` | DeepSeek 行：「`node:https`/`node:http` 直连，走代理时**自动降级**」 | 实为**自动改道**，不是降级：`src/lib/ai/deepseek.ts:110-121` —— 配了 `HTTPS_PROXY`/`HTTP_PROXY` 走 **CONNECT 隧道**，未配则回退 `httpsDirect` 直连。「降级」暗示质量变差，**方向会被读反** | ✅ **已修**：「配了 `HTTPS_PROXY` 则**改走 CONNECT 隧道**（undici 不读代理变量，在代理环境会挂死），无代理时直连兜底」 |
@@ -429,9 +429,9 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 | **AUD-22** | `docs/DEVELOPING.md:204` | 「同步点**共 4 处**（只算『改这个文件名/目录名就必须跟着改』的）」 | **限定语与实际对不上**：按该限定语，`tsconfig.json:42` 的 `exclude` 与静态 `import` **也必须改**。真相是**两个不同口径**：<br>・只改 `analyze.worker.cjs` **文件名** → **4 处**（全为运行时字符串 / 测试）<br>・改 `worker/` **目录名** → **9 处**（本台账 `:107`：再加 `tsconfig.json:42` ＋ 3 个 `.cjs` 的 import / 别名，含 `scheduler.ts:4` 的 `@/worker/run-analysis`） | ✅ **已修**：拆成两个口径分别写清 ＋ 附穷举命令，行号一并去掉（同 `AUD-20`） |
 | **AUD-23** | `docs/DEVELOPING.md:79-80` | 「本环境代理**只放行 `api.github.com`、拦 `github.com`**」 | 与**同节 `:71`** 的「`github.com` **时通时不通**」**自相矛盾**；且 **2026-09-20 实测推翻绝对化写法**：`git ls-remote`、`git push`、两次完整 PR 流程**全部走通** | ✅ **已修**：删掉「只放行 / 拦」的绝对判断，统一为「**时通时不通**」并写明实测 |
 | **AUD-24** | `docs/DEVELOPING.md:221` | 合并后用 **`--is-ancestor` 确认快进关系** | **在本仓库工作流下恒为假** —— 本仓库只用 **squash merge**（§2 规则 2），squash 是**新提交**，`merge-base --is-ancestor <分支head> origin/main` 必然不成立 | ✅ **已修**：换成 `git diff --stat <分支head> origin/main` **输出为空**（这正是 PR #29 / #30 实际用的判据） |
-| **AUD-25** | `docs/product.md:39`、`:49` | 「首页粘贴仓库地址 + base/head ref **即可**分析」 | **漏 fail-closed 前置**：未配 `MANUAL_TRIGGER_TOKEN` 时 `POST /api/tasks` **直接 503**，且首页必须**填口令**（`x-manual-trigger-token`，见 `src/app/api/tasks/route.ts:51`）。README `:206` 与 `:208-210` 两处都写了，**product.md 全文一处没提** | ✅ **已修**：两处补「+ 访问口令」＋「未配置则接口返回 503」 |
+| **AUD-25** | `docs/product.md:39`、`:49` | 「首页粘贴仓库地址 + base/head ref **即可**分析」 | **漏 fail-closed 前置**：未配 `MANUAL_TRIGGER_TOKEN` 时 `POST /api/tasks` **直接 503**，且首页必须**填口令**（`x-manual-trigger-token`，见 `src/app/api/tasks/route.ts:52`，2026-09-20 晚因新增 `safeEqual` import 下移 1 行）。README `:206` 与 `:208-210` 两处都写了，**product.md 全文一处没提** | ✅ **已修**：两处补「+ 访问口令」＋「未配置则接口返回 503」 |
 | **AUD-26** | `.env.example:9` | 「AI 语义引擎（**M3 里程碑才用到，M1-M2 可不填**）」 | M1–M5 已全部完成（`README.md:6`）→ 按里程碑描述的措辞**已失效**。且真实行为不是「可不填」而是**优雅降级**：`src/lib/ai/enrich.ts:22` 打 warn 后跳过，报告照出（`README.md:213` 同口径） | ✅ **已修**：改为「（可选）……未填 = 跳过 AI 判定，报告照出」 |
-| **AUD-27** | `docs/DEVELOPING.md:51` | 「`cacheHits` 非 0 → `totalFiles − changedFileCount` **算术闭合**」 | **缺前提**：`cacheHits` 由 `hitCache` 累加（`worker/analyze.worker.cjs:138,153`），条件是「**未变更 且 快照命中**」→ 只有**缓存全命中**时才恰好等于那个差值，**部分命中则小于** | ✅ **已修**：补「条件是『未变更 且 快照命中』；**仅当每个未变更文件都命中**时才等于……」 |
+| **AUD-27** | `docs/DEVELOPING.md:51` | 「`cacheHits` 非 0 → `totalFiles − changedFileCount` **算术闭合**」 | **缺前提**：`cacheHits` 由 `hitCache` 累加（`worker/analyze.worker.cjs` 的 `let cacheHits = 0` 与 `if (hitCache) cacheHits++`；⚠️ **别写死行号** —— 2026-09-20 修 P0-1 时已从 `:138,153` 漂到约 `:170,185`，请按 `grep -n "cacheHits"` 定位），条件是「**未变更 且 快照命中**」→ 只有**缓存全命中**时才恰好等于那个差值，**部分命中则小于** | ✅ **已修**：补「条件是『未变更 且 快照命中』；**仅当每个未变更文件都命中**时才等于……」 |
 | **AUD-28** | `docs/DEVELOPING.md:108`、`:192` | 归档目录「**5 份**复跑/审计报告」＋「`frontend-redesign.md`、`reports/` 下 **5 份**」＝ 6 项 | 实际 **7 个**文件 —— 多出的 `CODE_REVIEW_REPORT.md` 全文未提（属**列举不全**，不影响正确性） | ✅ **已修**：两处统一为「**7 份**（6 份复跑/审计报告 ＋ `frontend-redesign.md`）」。复测：该目录 `ls \| wc -l` = **7** |
 
 > 📌 **本轮的元教训（比前两轮更硬）**：**回归数 —— 第一轮 0 条、第二轮 0 条、第三轮 2 条。**
@@ -683,7 +683,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | # | 条目（含代码位置） | 现状 / 来源 | 动作 |
 |---|---|---|---|
 | ~~**S9**~~ | ✅ **2026-09-17 已修**。原 `invoke` 的 `catch` **不区分「HTTP 错误」与「网络异常」** → 对「200 / 429 之外的所有状态」一律 `throw`，再被 catch 接住、照走 `if (attempt < 4)` 重试 → **4xx（400 模型名错 / 401 鉴权失败 / 404）也重试满 4 次**，白烧 3 次请求 + ~3.5s 退避。⚠️ **原描述把 500 也归为「确定性错误」是错的** —— 5xx 是服务端临时故障，重试才对 | 新增 `NonRetryableError` 类：**4xx（429 除外，429 已在上面单独处理）**抛它 → catch 里立刻透传、不进退避轮次。**5xx / 网络异常照旧重试（行为不变）** | ✅ 验收：新增 1 条断言「400 是确定性错误 → 不重试，只发 1 次请求」；全量 **238 pass / 0 fail**。**灵敏度验证**：注释掉透传守卫 → **恰好该条变红**（`not ok 108`）、其余 237 条全绿 → 还原后 SHA-256 逐字节一致 |
-| **S10** | `src/lib/scheduler.ts:182`：失败任务的 `errorMessage` 拼成 `${err.message}\n${err.stack?.slice(0, 500)}`，随后**落库（:185）+ 推 SSE（:187）** → 前端可读到内部堆栈 | 来源 `docs/reports/CODE_REVIEW_REPORT.md` P6（第 117 行）；该报告 §5.4 自己判定「非公网前提下内部可接受，仅作打磨项」 | 二选一：**保持现状**（则转入 §三 `won't fix` 并写明理由）/ 改为**只落服务端日志**、对 SSE 只发 `err.message`。⚠️ 若判定不做，请移入 §三，别让它挂在待做区 |
+| **S10** | `src/lib/scheduler.ts:218`（2026-09-20 晚因 P0-2 改动下移 36 行）：失败任务的 `errorMessage` 拼成 `${err.message}\n${err.stack?.slice(0, 500)}`，随后**落库（:221）+ 推 SSE（:223）** → 前端可读到内部堆栈 | 来源 `docs/reports/CODE_REVIEW_REPORT.md` P6（第 117 行）；该报告 §5.4 自己判定「非公网前提下内部可接受，仅作打磨项」 | 二选一：**保持现状**（则转入 §三 `won't fix` 并写明理由）/ 改为**只落服务端日志**、对 SSE 只发 `err.message`。⚠️ 若判定不做，请移入 §三，别让它挂在待做区 |
 
 ---
 
@@ -755,7 +755,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 | # | 条目 | 现状与证据（真实代码） | 规划方向（待对齐，未实施） |
 |---|---|---|---|
-| ~~**U6**~~ | ✅ **2026-09-19 已修（(a)+(b)+(c) 全做）**。安全门禁完全不看「这次改了什么」 | ① 调用点**无条件**：原 `src/lib/scheduler.ts:152` `enrichSecurity(output.result, workdir)` → 现为 `enrichSecurity(output.result, workdir, task.baseRef, task.headRef)` ② 跳过条件**只有一个**：`src/lib/security/index.ts` `if (!manifest) return;` = 仓库根目录没有 `package.json` ③ 输入是**整仓清单**：`readManifest(workdir)` 读 `package.json` + `package-lock.json` → 产出**全仓库依赖存量**，不是 diff ④ 🔴 `security/` 四文件无一处读 `changedFiles`（该字段存在但未用） | **(a) 已做** —— 卡片导语标注「全仓依赖体检，与本次改动是否碰过依赖无关」；**(b) 已做** —— 新增 `detectChangedDeps(workdir, baseRef, headRef)`（`git show <baseRef>:package.json` 比对工作区 `package.json`，纯函数 `diffDepMaps` 判定 added/upgraded/downgraded/removed），结果挂 `securityStatus.depChanges`，报告页出「本次 PR 改动依赖：新增 N · 升级 M」或「未改动 package.json」；基线不可读返 `unknown`（绝不抛错）；**(c) 已做** —— `depChanges.added` 中的包在漏洞表行加「新增」徽标 |
+| ~~**U6**~~ | ✅ **2026-09-19 已修（(a)+(b)+(c) 全做）**。安全门禁完全不看「这次改了什么」 | ① 调用点**无条件**：原 `src/lib/scheduler.ts` 的 `enrichSecurity(output.result, workdir)`（现 4 参调用在 `:188`） → 现为 `enrichSecurity(output.result, workdir, task.baseRef, task.headRef)` ② 跳过条件**只有一个**：`src/lib/security/index.ts` `if (!manifest) return;` = 仓库根目录没有 `package.json` ③ 输入是**整仓清单**：`readManifest(workdir)` 读 `package.json` + `package-lock.json` → 产出**全仓库依赖存量**，不是 diff ④ 🔴 `security/` 四文件无一处读 `changedFiles`（该字段存在但未用） | **(a) 已做** —— 卡片导语标注「全仓依赖体检，与本次改动是否碰过依赖无关」；**(b) 已做** —— 新增 `detectChangedDeps(workdir, baseRef, headRef)`（`git show <baseRef>:package.json` 比对工作区 `package.json`，纯函数 `diffDepMaps` 判定 added/upgraded/downgraded/removed），结果挂 `securityStatus.depChanges`，报告页出「本次 PR 改动依赖：新增 N · 升级 M」或「未改动 package.json」；基线不可读返 `unknown`（绝不抛错）；**(c) 已做** —— `depChanges.added` 中的包在漏洞表行加「新增」徽标 |
 
 **为什么现状不算 bug（诚实记录另一半）**：CVE 是「**事后披露**」性质的 —— 你今天没动依赖，但上游包昨天刚被挂上新漏洞。
 若只在「改了依赖」时才扫，这一整类风险**永远扫不到**（正好是 `product.md:21` 的痛点原话：「依赖带漏洞无人盯 → **合并了才发现依赖有 CVE**」）。
@@ -805,7 +805,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | # | 条目 | 现状与证据（真实代码 + 行号） | 动作 / 风险 |
 |---|---|---|---|
 | ~~**U8**~~ | ✅ **2026-09-19 已修**（见 §一 第九批）。体积检测**可能静默低估** —— 🔴 **漏报方向，直接触及项目红线「少报最危险」** | ① 单包 HTTP 非 2xx → `{ bytes: 0 }`（`bundle-size.ts:59`）；catch（超时 / 网络失败）→ 同样 `{ bytes: 0 }`（`:67`）—— **两条路径都不打日志** ② `rows.filter(r => r.bytes > 0)` 把这些 0 **直接丢掉**（`:71-73`）→ `totalBytes` **少算**（`:75`）③ `packageCount: packages.length` **只数成功的**（`:80`）→ UI 那句「顶层依赖 N 个」（`page.tsx:354`）在部分失败时会**少报包数** | **(a) 把失败计数暴露出来**（"N 个包查询失败，数据不完整"）；**(b) 与 `exceeded` 门禁联动时给"数据不完整"标记** —— ⚠️ **否则"没超阈值"可能只是"压根没查全"**。与 `enrichUncertain` / `enrichSecurity` 的"静默降级"口径**冲突**：那些是"少一块不影响主结论"，这里是**在同一块里给了一个偏小的数**（性质更重） |
-| ~~**U9**~~ | ✅ **2026-09-19 已修**（见 §一 第九批）。**"查失败"在报告页不可见** —— 部分失败时没有任何提示 | `security/index.ts:24-39` 两个扫描走 `Promise.allSettled`，失败只 `console.error`（**只有服务器日志能看到**）；UI 端 `page.tsx:305` 是 `{r.vulnerabilities && (…)}` → CVE 扫描失败时**整块不渲染**，读者只能靠"**怎么少了一块**"去反推 | 卡片里加**显式状态行**（如"漏洞扫描：未产出"），**不要靠缺块暗示**。📌 参照物的差距：E2E 校验清单 `docs/reports/E2E-VERIFICATION-2026-09-16.md` 的 `A10` 明确要求「非 npm 项目或失败时**明确记「未产出」**」—— **报告页目前没有做到这一条** |
+| ~~**U9**~~ | ✅ **2026-09-19 已修**（见 §一 第九批）。**"查失败"在报告页不可见** —— 部分失败时没有任何提示 | `security/index.ts:144` 两个扫描走 `Promise.allSettled`（原引 `:24-39` 已漂移；按 `grep -n "allSettled"` 定位），失败只 `console.error`（**只有服务器日志能看到**）；UI 端 `page.tsx:305` 是 `{r.vulnerabilities && (…)}` → CVE 扫描失败时**整块不渲染**，读者只能靠"**怎么少了一块**"去反推 | 卡片里加**显式状态行**（如"漏洞扫描：未产出"），**不要靠缺块暗示**。📌 参照物的差距：E2E 校验清单 `docs/reports/E2E-VERIFICATION-2026-09-16.md` 的 `A10` 明确要求「非 npm 项目或失败时**明确记「未产出」**」—— **报告页目前没有做到这一条** |
 
 > ⚠️ 另有一条属**口径失真**（非功能缺失），并入 **U7 的 (a) 零成本修正**：
 > 字段名 `bundleSize` / 页面标题「构建体积」量的其实是 npm 上的 `dist.unpackedSize`（**整包解包后的大小**），
@@ -918,7 +918,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | # | 条目 | 不做的理由 | 什么条件下回头 |
 |---|---|---|---|
 | **B1** | tsconfig `extends` 继承的 `paths` 读不到（`analyze-core.cjs:480 buildPathAliases`，代码里已自带注释承认） | 要解析 TS 配置继承链（`extends` 可指向 npm 包、可数组、可级联），成本远大于收益；两个被扫描的真实仓库都不吃 `extends` | 真要拿它扫 **monorepo** 时 |
-| **B2** | barrel 文件自身被删时无法展开符号（`analyze.worker.cjs:152-170`） | 修法要把 base 侧已删文件并入可解析集 —— 动的是影响图核心数据结构，**有 B4 级回归风险**，而触发场景罕见 | 真碰到一次「删 barrel 静默漏报」的实例 → **先把样本加进「形态矩阵登记表」的 ❌ 区** |
+| **B2** | barrel 文件自身被删时无法展开符号（`analyze.worker.cjs` 的 `originOf()` / `resolveExportOrigin` barrel 穿透段；⚠️ **别写死行号** —— 2026-09-20 修 P0-1 时它已从 `:152-170` 漂到约 `:197`，请按 `grep -n "const originOf"` 定位） | 修法要把 base 侧已删文件并入可解析集 —— 动的是影响图核心数据结构，**有 B4 级回归风险**，而触发场景罕见 | 真碰到一次「删 barrel 静默漏报」的实例 → **先把样本加进「形态矩阵登记表」的 ❌ 区** |
 | **E4** | README 常态化核对 | 这是**习惯**不是待办。挂在清单上只会永远显示「未完成」，且每次都要重新判断 | 若哪天希望自动化 → 做成一条 CI 检查（届时是独立决策） |
 | **P2①** | 引擎被排除出 typecheck（`tsconfig.json:42`） | CJS + Babel AST 代码，开 TS 检查要大量 `any` 断言。**但代价是真实的**：引擎没有类型层保护 | 不需要回头 —— 替代措施是「样本集 + baseline 对比」双保险，属既定口径（见 `DEVELOPING.md`） |
 | **P2②** | `noUncheckedIndexedAccess` 未开 | 开了数组下标全变 `T \| undefined` → **大面积改动换理论收益** | 大规模重构时顺带评估 |
@@ -1010,3 +1010,23 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 > 🔧 **可复用技巧（本批新得）**：探测 ref 是否存在用 `git rev-parse --verify --quiet <ref>^{commit}` ——
 > 不存在时**退出码非 0 且不打印**，正好落进 `git()` 现有的 `catch { return null }`，**零新增错误处理分支**。
 > 已实测覆盖 5 种边界：分支名命中 `origin/main`、sha 回退、tag 回退、`origin/` 前缀不重复加、`main~N` 等价命中。
+
+### 第二批（同日续做，审核发现项全部落改）
+
+| # | 条目（含代码位置） | 现状 / 来源 | 动作 |
+|---|---|---|---|
+| **AUD-30** | **P0-2 异常逃逸** —— `src/lib/scheduler.ts` 的 `processTask()` | 🔴 **已修**。`findUnique` 原先在 `try` **之外**。抛错时 rejection 无人接：**裸 Node 直接崩进程**（实测退出码 1，`.finally()` 拦不住）；**Next.js 因自带 `unhandledRejection` 过滤器而不崩**（`unhandled-rejection.external.js:515` 顶层调用 `installUnhandledRejectionFilter()`），但本项目 `src/` 下**零个** `process.on` → 转给它内部队列后**谁也不处理 → 静默吞掉**。后果：任务停在 `parsing`、SSE 不推事件，只能等 `STALE_TASK_MS`（10 分钟）回收 | `findUnique` 与 `if (!repo)` 分支移进 `try`（`repo` 改为 `let ... : Repository \| null`）；catch 里 GitLab 回写加 `if (repo)` 守卫；调用点补 `.catch` 兜底。**定性从「进程崩溃」细化为「静默卡死」** —— 反而更贴红线（致命缺陷全在少报 / 静默方向） |
+| **AUD-31** | **P1-5 版本误判** —— `src/lib/security/index.ts` 的 `compareSemver()` | 🔴 **已修**。空格**上界**范围污染第三段：`>=1.2.0 <2.0.0` 去前缀后变 `1.2.02.0.0` → `split(".")` 取前三段得 `[1,2,2]`（上界的 2 顶掉真实第三段）→ 3 个判反实证。⚠️ 修正上一轮说法：**`\|\|` 那半碰巧是对的**（`parseInt("0\|\|2")` 遇非数字即停），不是设计正确 | `parse()` 先按 `\|\|` 切、再按空白切，只取首个版本范围（零依赖）。**已知边界**：语义相等但写法不同（如 `1.2.0` → `>=1.2.0 <2.0.0`）仍会产出一条 `downgraded` —— 这是 `diffDepMaps`「版本字符串不等即报」的既有行为，非 P1-5 范围 |
+| **AUD-32** | **P1-8 比较口径不一致** —— 三处 token 比对 | 🔴 **已修**。此前只有 GitHub 签名用 `timingSafeEqual`，GitLab webhook 与手动触发两处是 `!==`（非常量时间） | 新增导出 `safeEqual()`，三处统一（`api/webhook/route.ts` ×2、`api/tasks/route.ts` ×1）；`verifyGitHubSignature` 内部也改用它。README 签名校验那句已同步 |
+| **AUD-33** | **P1-3 git show 无超时** —— `src/lib/security/index.ts` 的 `readPkgDeps()` | 🟡 **已修**。全仓**唯一**一处 `execFileSync` 没给 `timeout` 的地方（worker 侧 `git()` 有 120s） | 新增 `GIT_SHOW_TIMEOUT_MS = 30000`。超时抛错已被现有 `catch { return null }` 接住，**不新增失败路径**。不易定点单测，靠 typecheck + 全量 test 兜 |
+| **AUD-34** | **P0-3 缓存只增不减** —— `.cache/repos/<repoId>` | 🟡 **已修**（预防性）。实测改动前 `.cache` **不存在**、repo 子目录 0 个 —— 属**结构性、尚未发作** | 新增 `src/lib/repo-cache.ts`：`pickEvictable()`（纯函数、可单测）+ `scanRepoCache()` + `pruneRepoCache()`；scheduler 每 10 分钟节流淘汰一次，上限 20 个 / 2GB，`activeWorkdirs` 豁免正在用的目录（try/finally 注销）。**已知边界**：豁免是**进程内**集合，**仅单实例有效**；多实例需 marker 文件 + 心跳续期 |
+
+> 🔴 **本批最贵的一条教训（行号漂移）**：落改后我按方案清单同步了 6 处台账行号，
+> **穷举复核又揪出 4 处**（`analyze.worker.cjs:138`、`api/webhook/route.ts:42`、
+> `security/index.ts:24-39`、以及 README / DEVELOPING 各 1 处）—— 它们**没出现在方案清单里**。
+> 根因：方案清单是**人工枚举**的，而台账里大量引用藏在超长行里（`grep` 显示为 `Omitted long line`，肉眼扫不到）。
+> ✅ **正解**（下次照做）：改完用
+> `grep -ohE '(文件1|文件2|…):[0-9-]+' docs/*.md README.md | sort -u`
+> **穷举出全部引用**再逐个实测新行号 —— `-o` 只吐匹配片段，**绕开长行截断**。
+> 📌 治本：凡引用位置，**优先写标识符 + `grep -n` 定位命令**，不写死行号（本批已把 `cacheHits`、
+> `originOf` 两处改成这种写法）。这与 §五 既有纪律一致：**写「怎么量」，不写「量出来多少」**。
