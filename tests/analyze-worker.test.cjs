@@ -138,6 +138,48 @@ test("事故守护：git 参数不带引号 → 状态判对（modified / added 
 });
 
 // ---------------------------------------------------------------------------
+// 🔴 P0-1 回归锁：专门补上「现有测试结构性抓不到」的那个盲区
+//
+// 现有用例每次都用 mkdtempSync **新建** workdir，永远走不到「复用缓存」这条路径，
+// 所以 250 个测试全绿也照样放过了陈旧检出。本用例固定 workdir 跑两次，
+// 中间往源仓库推一个新提交 —— 第二次必须看到它，否则就是检出到了 clone 时的旧位置。
+// 自建独立源仓库：本用例会往源仓库推提交，不能污染共享 fixture。
+// ---------------------------------------------------------------------------
+
+test("P0-1 回归锁：复用已有 workdir 时检出的是最新提交", async () => {
+  const src = fs.mkdtempSync(path.join(tmpRoot, "src-reuse-"));
+  git(["init", "-q", "-b", "main"], src);
+  git(["config", "user.email", "fixture@example.com"], src);
+  git(["config", "user.name", "fixture"], src);
+  write(path.join(src, "src/a.ts"), "export function a(): void {}\n");
+  git(["add", "-A"], src);
+  git(["commit", "-q", "-m", "v1"], src);
+
+  const workdir = fs.mkdtempSync(path.join(tmpRoot, "wd-reuse-"));
+  // 第一次：clone。此刻远端最新 = v1。
+  const first = await runWorker({ gitUrl: src, workdir, baseRef: "main", headRef: "main" });
+  assert.equal(first.error, undefined, `第一次不该走 error 分支：${String(first.error)}`);
+
+  // v2：改 a() 的签名（模拟「远端在此期间有更新」）
+  write(path.join(src, "src/a.ts"), "export function a(x: string): void {}\n");
+  git(["add", "-A"], src);
+  git(["commit", "-q", "-m", "v2"], src);
+
+  // 第二次：**复用同一个 workdir**。fetch 只更新 origin/*、本地 main 不动 ——
+  // 修复前 checkout 本地 main 停在 v1 → 工作区是旧代码。
+  const second = await runWorker({ gitUrl: src, workdir, baseRef: "main~1", headRef: "main" });
+  assert.equal(second.error, undefined, `第二次不该走 error 分支：${String(second.error)}`);
+
+  // 🔴 断言必须打在**符号 diff** 上，不能打在 changedFiles 上：
+  //    changedFiles 走 `git diff`（用已解析的 ref），即使工作区停在旧位置也照样列出文件；
+  //    真正受害的是「工作区内容 = v1」→ diff v1...v1 什么也检不出 → 报告「本次无变更」。
+  assert.ok(
+    second.result.changedSymbols.some((c) => c.file === "src/a.ts" && c.symbol === "a"),
+    "复用了旧 workdir，a() 的签名变更没被检出 → 检出的是 clone 时的旧代码（P0-1 回归）",
+  );
+});
+
+// ---------------------------------------------------------------------------
 // 变更检测
 // ---------------------------------------------------------------------------
 

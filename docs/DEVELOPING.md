@@ -169,7 +169,7 @@ npm run scan . main~5 main            # 扫自己
 worker/                🔴 **Worker 线程侧引擎，有意放在 `src/` 之外**
   analyze-core.cjs     引擎纯函数：AST 解析 / 导出符号 / import 解析 / 差异对比 / 影响图穿透
   rules.cjs            确定性规则引擎：semver 口径定级（proven / heuristic / uncertain）
-  analyze.worker.cjs   worker 入口：git clone / checkout / 调 analyze-core（.cjs，不进 bundle、不参与 tsc）
+  analyze.worker.cjs   worker 入口：git clone / fetch → resolveRef(→ origin/<ref>) → checkout / 调 analyze-core（.cjs，不进 bundle、不参与 tsc）
 src/lib/
   run-analysis.ts      主线程侧桥：new Worker + 软超时 + terminate() 回收（**会被 Next 打包**）
   persist.ts           结果落库（Prisma 事务 + 批量 deleteMany/createMany）

@@ -992,3 +992,21 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 > （4 条真做 + 其余关闭），**不是**"不许再发现问题"。所以新发现的**文档错误 / 数字过期**按 §五 规则 1
 > 直接落账（如 AUD 批）即属**记账**；只有**重开 §二 的待办**才算解冻。
 > 否则任何一次例行审计都触发"解冻"，冻结就失去了意义。
+
+---
+
+## 七、代码修复批（2026-09-20 · 全代码审查发现项）
+
+> **位置说明**：本段**追加在文件末尾**（§六 冻结声明之后），而不是插进 §一 / §二 ——
+> 台账里多处 `file:line` 互相引用，插在中间要连带改一批行号。**能追加就追加**。
+> 依据 §六 口径补充：**记账 ≠ 解冻**，本段只记账，不重开 §二 待办。
+
+| # | 条目（含代码位置） | 现状 / 来源 | 动作 |
+|---|---|---|---|
+| **AUD-29** | **P0-1 陈旧检出** —— `worker/analyze.worker.cjs` 的 `checkoutHead()` | 🔴 **已修**（2026-09-20）。**根因**：`git fetch` **只更新 `refs/remotes/origin/*`，本地分支不动** → 直接 checkout 本地分支名，检出的是**上次 clone 时的旧位置** → 整份报告基于旧代码，**且不报错、不失败**（「输出正常 ≠ 在工作」的实证）。实测（源仓库推 v3 后）：`checkout main` 得到 `v2`，`checkout origin/main` 得到 `v3` | 新增 `resolveRef()`：优先 `origin/<ref>`，远端没有再回退原 ref；主流程 `main()` 里解析一次得 `resolvedBase` / `resolvedHead`，`checkoutHead` / `changedFiles` / `git show <base>:<file>` 三处统一改用解析后的 ref。**附带（选项 A）**：`ensureRepo()` 的 `fetch` 返回值不再丢弃，失败即抛错「拒绝用上一次的缓存继续分析」—— 弱网时任务落 `failed`，按红线「响的失败优于静默错报」取舍 |
+| **AUD-29 回归锁** | `tests/analyze-worker.test.cjs` 新增用例「P0-1 回归锁：复用已有 workdir 时检出的是最新提交」 | 🔴 现有 250 个测试**结构性**抓不到本缺陷：`runWorker()` 每次 `mkdtempSync` **新建** workdir，永远走不到「复用缓存」这条路径 | 固定 workdir 跑两次，中间往源仓库推一个改签名的新提交；断言打在 **`changedSymbols`** 而不是 `changedFiles` —— 后者走 `git diff`（用已解析的 ref），工作区停在旧位置时它**照样列出文件**，测不出真正危害。**灵敏度自检**：改回 `checkoutHead(headRef)` → **恰好该条变红**、其余 8 条全绿；还原后 9 条全绿 |
+| **AUD-29 验证** | 四门禁 + 端到端 | ✅ `lint` / `typecheck` / `test`（**251 pass / 0 fail**，较修复前 +1）/ `build` 全绿；真实仓库端到端冒烟正常 | 已修，无后续 |
+
+> 🔧 **可复用技巧（本批新得）**：探测 ref 是否存在用 `git rev-parse --verify --quiet <ref>^{commit}` ——
+> 不存在时**退出码非 0 且不打印**，正好落进 `git()` 现有的 `catch { return null }`，**零新增错误处理分支**。
+> 已实测覆盖 5 种边界：分支名命中 `origin/main`、sha 回退、tag 回退、`origin/` 前缀不重复加、`main~N` 等价命中。

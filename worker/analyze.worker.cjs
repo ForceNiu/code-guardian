@@ -54,8 +54,35 @@ function ensureRepo(gitUrl, workdir) {
       throw new Error(`git clone 失败: ${gitUrl}`);
     }
   } else {
-    git(["-C", workdir, "fetch", "--quiet", "--all", "--prune"], process.cwd());
+    // 🔴 原写法丢弃返回值：fetch 失败（网络 / 鉴权）时照常往下走，用上一次的缓存继续分析。
+    //    fetch 失败 + 陈旧检出 = 双重静默错报，所以改成硬失败（P0-1 选项 A）。
+    //    代价：弱网时任务落 failed，而不是出一份基于旧代码的报告 —— 按项目红线，
+    //    「响的失败」优于「静默错报」。
+    const out = git(["-C", workdir, "fetch", "--quiet", "--all", "--prune"], process.cwd());
+    if (out == null) {
+      throw new Error("git fetch 失败：拒绝用上一次的缓存继续分析（否则会产出基于旧代码的报告）");
+    }
   }
+}
+
+/** 把 ref 解析成「fetch 之后最新」的那一个引用。
+ *  🔴 根因（P0-1）：`git fetch` 只更新 refs/remotes/origin/*，**本地分支不动**。
+ *     直接 checkout 本地分支名 → 检出上次 clone 时的旧位置 → 整份报告基于旧代码，
+ *     且不报错、不失败（静默错报，正是「输出正常 ≠ 在工作」）。
+ *     实测（2026-09-20）：源仓库推 v3 后，checkout main 得到 v2，checkout origin/main 得到 v3。
+ *  策略：优先 `origin/<ref>`；远端没有再回退原 ref。已实测覆盖 5 种边界：
+ *    分支名 → origin/main 命中；sha → origin/<sha> 不存在、回退（正确）；
+ *    tag → origin/<tag> 不存在、回退（tag 名本就不带 origin/）；
+ *    已带 origin/ 前缀 → origin/origin/main 不存在、回退（正确）；
+ *    main~N → origin/main~N 命中（等价语义）。
+ *  用 `rev-parse --verify --quiet`：ref 不存在时**退出码非 0 且不打印**，
+ *  正好落进 git() 现有的 `catch { return null }` → 零新增错误处理分支。 */
+function resolveRef(ref, workdir) {
+  const remote = `origin/${ref}`;
+  if (git(["-C", workdir, "rev-parse", "--verify", "--quiet", `${remote}^{commit}`], workdir) != null) {
+    return remote;
+  }
+  return ref;
 }
 
 /** 切换到 headRef（detached HEAD），保证工作区文件 = head 状态，供读取新代码全文 */
@@ -107,10 +134,15 @@ function listSourceFiles(workdir) {
 function main() {
   const { gitUrl, baseRef, headRef, workdir, cache } = workerData;
   ensureRepo(gitUrl, workdir);
-  checkoutHead(headRef, workdir);
+  // 🔴 P0-1：后续所有 git 读操作都必须用「已解析到远端」的 ref，不能用原始分支名
+  //    （fetch 只更新 origin/*，本地分支还停在 clone 时的位置 → 检出旧代码）。
+  //    只在开头解析一次：git show 在变更文件循环里跑，逐次解析会多起 N 个 git 进程。
+  const resolvedBase = resolveRef(baseRef, workdir);
+  const resolvedHead = resolveRef(headRef, workdir);
+  checkoutHead(resolvedHead, workdir);
 
   const allFiles = new Set(listSourceFiles(workdir));
-  const changed = changedFiles(baseRef, headRef, workdir).filter((f) =>
+  const changed = changedFiles(resolvedBase, resolvedHead, workdir).filter((f) =>
     SOURCE_EXT.includes(path.extname(f)),
   );
   const changedSet = new Set(changed);
@@ -190,7 +222,7 @@ function main() {
     // ⚠️ 绝不能给路径加引号：`execFileSync` 不经 shell，引号会变成路径的一部分
     // （git 会去找名为 "src/x.ts" 带引号的文件 → 找不到 → 返回 null → 所有文件被误判 added）。
     // 无 shell 时路径含空格也是安全的，不需要引号。
-    const oldContent = git(["-C", workdir, "show", `${baseRef}:${file}`], workdir);
+    const oldContent = git(["-C", workdir, "show", `${resolvedBase}:${file}`], workdir);
     const oldExports = oldContent != null ? parseFile(oldContent).exports : [];
 
     let status = "modified";
