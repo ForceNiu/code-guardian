@@ -1,5 +1,6 @@
 // M3b AI 语义引擎：LangGraph 4 节点管线（问题重述 → 上下文检索 → 影响面预测 → 修复建议）。
-// 只处理规则引擎判为 uncertain（置信度 <70%）的变更，规则能搞定的 80% 不送 AI，控制成本。
+// 只处理规则引擎判为 uncertain（置信度 <70%）的变更；规则已定级的（proven / heuristic）不送 AI，控制成本。
+// ⚠️ 刻意不写具体比例：全仓无测算出处，且真实仓库实测 0 `uncertain`（见 docs/AUDIT-BACKLOG.md 审计收口批 AUD-1）。
 // 架构见 docs/architecture.md §8「双轨审查引擎」。
 
 import { StateGraph, Annotation, START, END } from "@langchain/langgraph";

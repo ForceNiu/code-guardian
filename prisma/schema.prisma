@@ -26,7 +26,7 @@ model Repository {
   name          String
   gitUrl        String   @unique @map("git_url") // 唯一：按 git 地址去重建仓库
   defaultBranch String   @default("main") @map("default_branch")
-  rulesConfig   Json     @default("{}") @map("rules_config") // 规则开关，热更新
+  rulesConfig   Json     @default("{}") @map("rules_config") // ⚠️ 预留：当前全仓无读写 —— 注释里的「规则开关/热更新」尚未实现，勿当既有能力引用
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

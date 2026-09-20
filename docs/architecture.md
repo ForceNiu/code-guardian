@@ -91,7 +91,7 @@ code-guardian/
 
 | 表 | 职责 | 关键字段 |
 | :--- | :--- | :--- |
-| `repositories` | 仓库配置 | `git_url`、`default_branch`、`rules_config`(JSON) |
+| `repositories` | 仓库配置 | `git_url`；`default_branch` / `rules_config` 为**预留字段，当前无代码读写**（见下方 ⚠️） |
 | `tasks` | 审查任务 | `status` 状态机、`result`(JSON)、**唯一索引 `(repo_id, mr_id, commit_sha)` 防重** |
 | `file_snapshots` | 文件哈希缓存 | `file_path`、`content_hash`(MD5) |
 | `export_symbols` | 导出符号反向索引 | `symbol_name`、`symbol_type`、`importers`(JSON)、索引 `(repo_id, file_path, symbol_name)` |
@@ -99,6 +99,11 @@ code-guardian/
 > ⚠️ **`feedbacks` 表已于 PR #23（2026-09-17）删除** —— 迁移 `prisma/migrations/20260917054609_remove_feedback/migration.sql`
 > 明写 `DROP TABLE "feedbacks"`。该表此前长期是「预留」状态（只有读、无写入 API），最终按台账 `P2③` 的收口方向处理。
 > **用前复测**：`git grep -n "^model " prisma/schema.prisma` —— 以 `schema.prisma` 为准，不要相信任何写死的表数量。
+
+> ⚠️ **`repositories` 的这两个字段是「预留未启用」**（2026-09-20 查到）：`default_branch` 只有 `prisma/seed.ts:24` 写过一次，
+> **无任何代码读取**；`rules_config` 更是**全仓零读写**（只出现在 `prisma/schema.prisma:29` 与初始迁移 `20260902131530_init` 里）。
+> schema 那行注释原写「规则开关，热更新」，但**那套开关从未实现** —— 既没有读开关的代码，也没有改开关的入口。
+> 📌 与上一段的 `feedbacks` 是同一个坑：**schema 里出现的字段 ≠ 已实现的能力**；引用前先 `git grep` 出它在代码里的实际读写点。
 
 **任务状态机**：`pending → parsing → analyzing → reporting → done / failed`
 
@@ -170,7 +175,7 @@ Webhook / 手动触发
 scheduler.processTask()
   └─ runAnalysis(worker)           # AST 影响链路
   └─ enrichUncertain(result)        # M3b AI 语义判定
-  └─ enrichSecurity(result, workdir) # M5 安全门禁（失败静默降级）
+  └─ enrichSecurity(result, workdir, task.baseRef, task.headRef) # M5 安全门禁（失败静默降级）
        ├─ readManifest()            # 读 package.json + package-lock.json 提取依赖清单
        ├─ scanVulnerabilities()     # 完整依赖树 → npm Bulk Advisory 端点
        └─ measureBundleSize()       # 顶层依赖 → npm registry 查 unpackedSize
@@ -191,7 +196,7 @@ scheduler.processTask()
 ### 构建体积检测（`src/lib/security/bundle-size.ts`）
 
 - 顶层依赖逐包查 `GET /{pkg}/{version}` 的 `dist.unpackedSize`（scoped 包 `/` 编码为 `%2F`）
-- 8 并发 + 单包失败静默跳过；累计总体积 + 最大单包
+- 8 并发；单包失败**不再静默**（U8，2026-09-19）—— 计入 `failedCount` 并置 `incomplete`，报告页显式提示「查询 N 个 / 失败 M 个」。累计总体积 + 最大单包
 - 门禁阈值：总依赖 100MB（`exceeded` 布尔）
 
 ### GitLab 状态回写（`src/lib/status/gitlab-status.ts`）

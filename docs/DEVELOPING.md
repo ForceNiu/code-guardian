@@ -4,7 +4,8 @@
 > 它**刻意不包含**「当前进度 / 待办清单 / 本轮改了什么」—— 那类内容过期极快，写进来只会变成
 > 一份需要同步维护的负债。想知道现状，看 `README.md`、`docs/architecture.md` 与 `git log`。
 >
-> 由来：2026-09-16 由一份**本地交接件**（`HANDOVER.md`，从未入库，现已删除）改写而来，
+> 由来：2026-09-16 由一份**本地交接件**（`HANDOVER.md`，从未入库；**已删出仓库并归档**在仓库外
+> `资料归档/code-guardian-HANDOVER-2026-09-16.md`，2026-09-20 更正 —— 原写「现已删除」，而归档件仍在）改写而来，
 > 只保留其第 5 节（红线）、第 6 节（方法论）、第 7 节（文件地图），并补回一节「怎么验证」。
 > 剔掉的部分（当时进度 / 待办清单 / 个人信息明细）**没有并入本文件** —— 它们要么已过期，
 > 要么在 `git log`、`README.md`、`docs/architecture.md` 里有更好的出处。
@@ -14,7 +15,7 @@
 ## 1. 怎么验证（改动前后都该跑）
 
 ```bash
-# 四道门禁 —— 与 CI（.github/workflows/ci.yml）完全一致
+# 四道门禁 —— 与 CI（.github/workflows/ci.yml）**同一套命令**（沙箱里额外加 env -u NODE_OPTIONS）
 env -u NODE_OPTIONS npm run lint
 env -u NODE_OPTIONS npm run typecheck
 env -u NODE_OPTIONS npm test          # node:test，注意 tests/*.test.cjs 必须一起统计
@@ -72,7 +73,16 @@ npm run scan . main~5 main            # 扫自己
    ① 用户在自己终端 push；② 走 GitHub Git Data API（提交**未签名**时可逐提交重建，
    断言返回 sha == 本地 sha，全等即字节等价）。
    > ⚠️ 旧版本此处写的是「先重试 2–3 次再判网络不通」—— **已证伪**（白花 4 分钟，4 次全 128）。
-9. 无 `gh` CLI，查 PR / CI 用 curl + 钥匙串凭据（**不要 echo token**）：
+9. **查 PR / CI 用 `gh`**（2026-09-20 更正 —— 旧版写「无 `gh` CLI」，**该结论是错的**）：
+   `gh` 在 **`/opt/homebrew/bin/gh`**（v2.73.0），但**不在默认 `PATH`** → `which gh` 会报 not found，
+   **所以不能用 `which` 判它是否存在**。此坑真实付过代价：据此连错两轮，把 PR #26/#27/#28
+   都推给了用户手动开。用绝对路径调用即可；它走 `api.github.com`，而本环境代理**只放行
+   `api.github.com`、拦 `github.com`** → `gh` 恰好是「push 被挡」时查 PR / CI 的可用通道。
+   ```bash
+   /opt/homebrew/bin/gh pr view <n>       # PR 状态
+   /opt/homebrew/bin/gh pr checks <n>     # CI 结果
+   ```
+   **备用**（`gh` 不可用时）：curl + 钥匙串凭据（**不要 echo token**）：
    `TOKEN=$(printf "protocol=https\nhost=github.com\n" | git credential fill | sed -n 's/^password=//p')`
    CI 状态用 `commits/<sha>/check-runs`（比 `statuses` 稳）。
 10. 🔴 **写端点一律 fail-closed**：`POST /api/tasks` 要 `x-manual-trigger-token`（比对
@@ -183,7 +193,7 @@ docs/
   # 已于 2026-09-19 移出本仓库，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`。
   # 其中成本口径与「看起来异常实际正常」备案已搬进本文件 §1.1 / §1.2。
 tests/
-  *.test.cjs / *.test.ts   node:test 单测 17 个文件（CI 第三道门禁）
+  *.test.cjs / *.test.ts   node:test 单测 18 个文件（CI 第三道门禁；复测 `ls tests/*.test.* | wc -l`，**此数随开发增长**）
 LICENSE                  MIT / Copyright (c) 2026 ForceNiu
 .github/workflows/ci.yml lint → typecheck → test → build 四道门禁
 ```
