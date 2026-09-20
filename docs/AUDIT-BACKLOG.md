@@ -8,6 +8,12 @@
 > 来源：2026-09-16 全项目审查（25 条）+ 同日新查出的 2 条静默漏报（原清单没有）。
 > 口径：审计清单的职责是「**不漏**」，排序是另一件事 —— 所以下面只有三态：做 / 不做（附理由）/ 待定。
 
+> 📦 **归档声明（2026-09-19）**：原 `docs/reports/` 下 5 份复跑/审查报告（`CODE_REVIEW_REPORT` / `E2E-VERIFICATION-2026-09-16` /
+> `E2E-RERUN-2026-17` / `STRUCTURE-AUDIT-2026-09-17` / `TEXT-AUDIT-2026-09-17`）+ `docs/frontend-redesign.md`
+> **已移出本仓库**，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`。
+> 本台账中凡指向 `docs/reports/*.md` 的链接均指向该归档目录（其中 `E2E-RERUN-2026-09-19.md` 此前从未入库）。
+> 独有内容（成本口径、复跑「看起来异常实际正常」备案）已搬入 `docs/DEVELOPING.md` §1.1 / §1.2。
+
 ---
 
 ## 图例
@@ -234,6 +240,28 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 2. **核「表还在不在」时，权威源有且只有一个 = `schema.prisma` 的 `model` 列表。** `prisma/migrations/` 是**历史**：
    全仓 grep `feedback` 会同时命中 `20260902131530_init` 的 `CREATE TABLE "feedbacks"` 与 `20260917054609_remove_feedback` 的 `DROP TABLE`
    —— **两条都在，按关键词 grep 必然得出自相矛盾的结论。**（本批差点被这个骗过去。）
+
+---
+
+### 2026-09-19 第九批 · 四条产品级缺口落地（U5 / U8 / U9 / U10）+ U11 登记
+
+> 来源：2026-09-18 教学第 0 / 4 阶登记（§二.12 / §二.15 / §二.16），2026-09-19 用户拍板「全部进行修改」后落地。
+> 四条的共性：**都不是「算错了」，而是「少算了却看不出来」或「没说清」** —— 与项目红线「致命缺陷全在少报方向」同向。
+
+| # | 缺口 | 落地的改动（真实文件） | 验证方式（双向可复现） |
+|---|---|---|---|
+| **U5** | 解析失败不区分原因 | `worker/analyze-core.cjs` 新增 `classifyParseError()`（`syntax` / `unsupported` / `empty`）；`parseFile` 返回体加 `parseError`；`resolveFileSymbols` 透传；`worker/analyze.worker.cjs` 循环内累计 `parseFailures` 进 `summary`；`src/lib/types.ts` 加 `summary.parseFailures`；报告页顶部按原因出警示块 | 三种文件同时跑 → `parseFailures: {syntax:1, unsupported:1, empty:1}` |
+| **U8** | 体积检测静默低估 | `src/lib/security/bundle-size.ts` 统计 `queriedCount` / `failedCount` / `incomplete`；`types.ts` 同步；报告页体积块在 `incomplete` 时出「查询 N / 失败 M」提示 | 构造 2 个包、1 个查询失败 → `queriedCount 2 / failedCount 1 / incomplete True` |
+| **U9** | 「查失败」在报告页不可见 | `src/lib/security/index.ts` 无论成败都写 `result.securityStatus = { vulnerabilities, bundleSize }`（`ok` / `failed` / `skipped`）；报告页安全卡片条件由 `{r.vulnerabilities && …}` 改为 `{r.vulnerabilities \|\| r.bundleSize \|\| r.securityStatus}` 并加失败警示块 | 非 npm 项目 → `skipped`；正常项目 → `{bundleSize:"ok", vulnerabilities:"ok"}` |
+| **U10** | 引擎只看对外接口，**全仓未声明** | 报告页影响链路上方加边界警示块（「0 条 ≠ 没影响」）；`docs/product.md` 新增 **§10 已知边界**（10.1 接口轴 / 10.2 解析失败分类 / 10.3 安全门禁 `ok`-`failed`-`skipped`）；`README.md` 新增「已知边界（判读报告时必读）」表 | 三处均可用 `grep -rn "已知边界" README.md docs/product.md` 命中 |
+| **U11** | 非 ASCII 路径变更被**静默丢弃**（2026-09-19 复跑发现；此前**只存在于未入库的复跑报告里**，台账无条目） | `worker/analyze.worker.cjs` 的 `git()` 加 `-c core.quotepath=false`（一行） | 中文路径 fixture：`changedFiles` **1 → 3**；撤掉该参数则退回 1 |
+
+- ✅ 四道门禁全绿：`lint` / `typecheck` / `test` / `build`（单测 **244 pass / 0 fail**，此数随开发增长，**用前复测**）。
+- ✅ 单测同步更新：`tests/analyze-core.test.cjs` 的 `parseFile` 用例改为验证三类分类（原断言只看 `{exports,imports,reexports}`，已过期）。
+- 📌 **同源后续**：**U6 / U7 已于本会话落地**（见 §二.13 / §二.14 的 ✅ 标注）—— U6(a) 卡片标注「全仓依赖体检（与本次改动无关）」、U6(b/c) 新增 `detectChangedDeps` 比对 base/head 的 package.json 并给新增依赖打「新增」徽标；U7(a) 表头「影响范围」→「中招版本」并改写导语、U7(b) `isDev` 标记让 devDependencies 在漏洞表标「（dev）」。**U4(a)(b)**（覆盖范围声明 + 装饰器插件）仍**未做，仅规划**，见 §二.12。
+
+> ⚠️ 本批的元教训（与 U2 那条同族）：**U11 已经在代码注释和复跑报告里写了，但没进台账**
+> → 差点出现「报告说修了、台账查不到」的断链。判据：**发现即登记，不等到修完**。
 
 ---
 
@@ -541,7 +569,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 | # | 条目 | 现状与证据 | 规划方向（待对齐，未实施） |
 |---|---|---|---|
 | **U4** | **支持边界太窄 → 缺前端通用性** | ① `SOURCE_EXT`（`worker/analyze-core.cjs:10`）只有 `.js` / `.jsx` / `.ts` / `.tsx` / `.mjs` / `.cjs` → 🔴 **`.vue` 根本不在名单**（连解析都不会尝试，纯 Vue 项目上基本无用）② **装饰器实测 FAIL**（报「需要开启 `decorators` / `decorators-legacy`」，本项目只开了 typescript + jsx）→ Angular / NestJS / TypeORM 风格项目**每个文件都进 `catch`**，影响链路整体失效 | 三条路，成本差很大：**(a) 零成本** —— README 如实声明覆盖范围，不做假承诺；**(b) 一行成本** —— `plugins` 加 `decorators-legacy`，直接解锁装饰器项目；**(c) 大工程** —— 支持 `.vue`（拆 `<script>` 块 + 行号偏移映射 + 模板引用）。**建议先 (a)+(b)，(c) 单独立项** |
-| **U5** | **解析失败不区分原因（静默）** | `parseFile`（`:282-295`）的 `catch` 一律返回三个空数组；全仓**没有任何** `parseError` 类标记 → **降级完全静默**。三种性质**完全不同**的情况被混为一谈：① 代码语法真错（用户的问题）② **我们根本不支持这种语法**（能力边界）③ 空文件 | 用户口径（2026-09-18 原话）：「**静默降级本身没有问题**，但如果是**代码类型缺少**，需要**不同的提示信息**」 → 加"失败原因"字段（至少把「我们不支持」与「你代码有错」分开），并把**未解析文件数**暴露到报告页或日志。⚠️ 与项目红线直接相关：**致命缺陷全在「少报」方向**（见 `DEVELOPING.md` §1） |
+| ~~**U5**~~ | ✅ **2026-09-19 已修**（见 §一 第九批）。~~**解析失败不区分原因（静默）**~~ | `parseFile`（`:282-295`）的 `catch` 一律返回三个空数组；全仓**没有任何** `parseError` 类标记 → **降级完全静默**。三种性质**完全不同**的情况被混为一谈：① 代码语法真错（用户的问题）② **我们根本不支持这种语法**（能力边界）③ 空文件 | 用户口径（2026-09-18 原话）：「**静默降级本身没有问题**，但如果是**代码类型缺少**，需要**不同的提示信息**」 → 加"失败原因"字段（至少把「我们不支持」与「你代码有错」分开），并把**未解析文件数**暴露到报告页或日志。⚠️ 与项目红线直接相关：**致命缺陷全在「少报」方向**（见 `DEVELOPING.md` §1） |
 
 ---
 
@@ -553,7 +581,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 | # | 条目 | 现状与证据（真实代码） | 规划方向（待对齐，未实施） |
 |---|---|---|---|
-| **U6** | **安全门禁完全不看「这次改了什么」** —— 不读 `changedFiles`（本次改动的文件清单）、不判断是否新增依赖、不看是否碰过 `package.json` | ① 调用点**无条件**：`src/lib/scheduler.ts:152` `await enrichSecurity(output.result, workdir);` —— 相邻唯一的中断条件是 `:146 if (ctrl.cancelled) return;`（超时取消），**与改动内容无关** ② 跳过条件**只有一个**：`src/lib/security/index.ts:22` `if (!manifest) return;` = 仓库根目录没有 `package.json` ③ 输入是**整仓清单**：`readManifest(workdir)`（`dependency-manifest.ts:60`）读 `package.json` + `package-lock.json` → 产出的是**全仓库依赖存量**，不是 diff ④ 🔴 **`security/` 四个文件无一处读 `changedFiles`**（该字段在 `src/lib/types.ts` 的 `AnalysisResult` 里存在） | 三层可选，成本递增：**(a) 零成本** —— 报告页把「安全门禁」卡片显式标注「**全仓依赖体检（与本次改动无关）**」，消掉误读；**(b) 低成本** —— 用 `changedFiles` 判断本次是否新增/升级依赖（比对 `package.json` / lockfile 的 diff），命中时额外出「改动级摘要」，未命中仍照出全仓体检；**(c) 中等** —— 新增依赖单独高亮区块。⚠️ **(a) 就应该做**：现在 `vulnerabilities` / `bundleSize` 与影响链路**并列同一份报告**，读者第一反应是「**这个 MR 引入的**」（E2E 实据 `A10`：`vulnerabilities 13` / `bundleSize 365.0 MB` —— 那是仓库存量，不是本次改动引入的） |
+| ~~**U6**~~ | ✅ **2026-09-19 已修（(a)+(b)+(c) 全做）**。安全门禁完全不看「这次改了什么」 | ① 调用点**无条件**：原 `src/lib/scheduler.ts:152` `enrichSecurity(output.result, workdir)` → 现为 `enrichSecurity(output.result, workdir, task.baseRef, task.headRef)` ② 跳过条件**只有一个**：`src/lib/security/index.ts` `if (!manifest) return;` = 仓库根目录没有 `package.json` ③ 输入是**整仓清单**：`readManifest(workdir)` 读 `package.json` + `package-lock.json` → 产出**全仓库依赖存量**，不是 diff ④ 🔴 `security/` 四文件无一处读 `changedFiles`（该字段存在但未用） | **(a) 已做** —— 卡片导语标注「全仓依赖体检，与本次改动是否碰过依赖无关」；**(b) 已做** —— 新增 `detectChangedDeps(workdir, baseRef, headRef)`（`git show <baseRef>:package.json` 比对工作区 `package.json`，纯函数 `diffDepMaps` 判定 added/upgraded/downgraded/removed），结果挂 `securityStatus.depChanges`，报告页出「本次 PR 改动依赖：新增 N · 升级 M」或「未改动 package.json」；基线不可读返 `unknown`（绝不抛错）；**(c) 已做** —— `depChanges.added` 中的包在漏洞表行加「新增」徽标 |
 
 **为什么现状不算 bug（诚实记录另一半）**：CVE 是「**事后披露**」性质的 —— 你今天没动依赖，但上游包昨天刚被挂上新漏洞。
 若只在「改了依赖」时才扫，这一整类风险**永远扫不到**（正好是 `product.md:21` 的痛点原话：「依赖带漏洞无人盯 → **合并了才发现依赖有 CVE**」）。
@@ -568,7 +596,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 | # | 条目 | 现状与证据（真实代码 / 真实 UI） | 规划方向（待对齐，未实施） |
 |---|---|---|---|
-| **U7** | **只给「哪个包哪个版本中招」，不给「对你的项目有什么影响」** | ① 🔴 **UI 有一列表头就叫「影响范围」，但它不是那个意思** —— 值取的是 `v.vulnerableVersions` = **该包哪些版本中招**（如 `<4.17.21`），列名极易被读成"对我的项目的影响范围"（`src/app/tasks/[id]/page.tsx:319` 表头 / `:340` 取值）→ **列名误导，是本次困惑的直接来源之一** ② 全表**唯一的"相关性"信号只有 `isDirect`**（非直接依赖在包名后标「（传递）」，`page.tsx:327`）③ 🔴 **运行时依赖与构建时依赖被合并成一份**：`dependency-manifest.ts:31` `{ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }` → **只在打包/测试时用的工具包报了 CVE**，和**打进线上产物的运行时包报了 CVE**，在报告里**长得一模一样** | **(a) 零成本（建议先做）** —— 报告页：把「影响范围」列**改名**为「中招版本」之类；卡片描述补一句「**这是依赖提醒清单，不等于对你的项目的影响结论**」。**(b) 低成本** —— `readDirect` 保留 `dependencies` / `devDependencies` 的来源标记，报告里**分开呈现**（构建时依赖降级或折叠）。**(c) 中低成本 · 本项目独有优势** —— 🔴 **引擎已经有反向索引**（第 4 阶单元 ③）：它已经知道"每个文件 import 了谁"。把**中招包的包名**拿去比对这张表，就能免费得到「**这个包被你的 N 个文件引用了 / 完全没被引用**」—— 这是"相关性"的第一个真实台阶，成本远低于完整的可达性分析。**(d) 大工程（不建议现在做）** —— 真·可达性分析（代码能不能走到那段有漏洞的函数） |
+| ~~**U7**~~ | ✅ **2026-09-19 已修（(a)+(b) 全做）**。只给「哪个包哪个版本中招」，不给「对你的项目有什么影响」 | ① 🔴 原 UI 表头「影响范围」取的却是 `v.vulnerableVersions`（该包中招版本，如 `<4.17.21`），列名易读成"对项目的影响范围" → **已改名「中招版本」** ② 全表唯一"相关性"信号只有 `isDirect`（非直接依赖标「（传递）」）③ 🔴 运行时 / 构建时依赖此前混成一份：`readDirect` 把 `dependencies` 与 `devDependencies` 合并丢失来源 | **(a) 已做** —— 表头「影响范围」→「中招版本」；导语补「列表每条漏洞来自当前依赖树真实存在的包，不代表本次 PR 引入；中招版本是漏洞影响区间，不是本次改动影响范围」。**(b) 已做** —— `DependencyInfo` / `Vulnerability` 加 `isDev?`：`readDirect` 分出 devDependencies、`readLockfile` 读 lockfile 的 `dev` 标记、`cve-scan` 透传到 `Vulnerability.isDev`，报告页对 dev 依赖标「（dev）」。**(c)/(d) 仍规划未做**（反向索引相关性 / 真·可达性分析） |
 
 **它答不了的三件事（要判断"影响"就必须有这三样）**：
 
@@ -595,15 +623,15 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 | # | 缺失 | 属哪一轴 | 详述 |
 |---|---|---|---|
-| **U6** | 颗粒度是**仓库级**，不看本次改动 | **颗粒度** | §二.13 |
-| **U7** | 只给"哪个包中招"，给不出"**对你项目的影响**" | **深度** | §二.14 |
+| ~~**U6**~~ | ✅ 2026-09-19 已修（见 §二.13）| **颗粒度** | §二.13 |
+| ~~**U7**~~ | ✅ 2026-09-19 已修（见 §二.14）| **深度** | §二.14 |
 | **U8** | 体积检测**可能静默低估** | **准确度（🔴 漏报方向）** | 本节 |
 | **U9** | **"查失败"在报告页不可见** | **可观测性** | 本节 |
 
 | # | 条目 | 现状与证据（真实代码 + 行号） | 动作 / 风险 |
 |---|---|---|---|
-| **U8** | 体积检测**可能静默低估** —— 🔴 **漏报方向，直接触及项目红线「少报最危险」** | ① 单包 HTTP 非 2xx → `{ bytes: 0 }`（`bundle-size.ts:59`）；catch（超时 / 网络失败）→ 同样 `{ bytes: 0 }`（`:67`）—— **两条路径都不打日志** ② `rows.filter(r => r.bytes > 0)` 把这些 0 **直接丢掉**（`:71-73`）→ `totalBytes` **少算**（`:75`）③ `packageCount: packages.length` **只数成功的**（`:80`）→ UI 那句「顶层依赖 N 个」（`page.tsx:354`）在部分失败时会**少报包数** | **(a) 把失败计数暴露出来**（"N 个包查询失败，数据不完整"）；**(b) 与 `exceeded` 门禁联动时给"数据不完整"标记** —— ⚠️ **否则"没超阈值"可能只是"压根没查全"**。与 `enrichUncertain` / `enrichSecurity` 的"静默降级"口径**冲突**：那些是"少一块不影响主结论"，这里是**在同一块里给了一个偏小的数**（性质更重） |
-| **U9** | **"查失败"在报告页不可见** —— 部分失败时没有任何提示 | `security/index.ts:24-39` 两个扫描走 `Promise.allSettled`，失败只 `console.error`（**只有服务器日志能看到**）；UI 端 `page.tsx:305` 是 `{r.vulnerabilities && (…)}` → CVE 扫描失败时**整块不渲染**，读者只能靠"**怎么少了一块**"去反推 | 卡片里加**显式状态行**（如"漏洞扫描：未产出"），**不要靠缺块暗示**。📌 参照物的差距：E2E 校验清单 `docs/reports/E2E-VERIFICATION-2026-09-16.md` 的 `A10` 明确要求「非 npm 项目或失败时**明确记「未产出」**」—— **报告页目前没有做到这一条** |
+| ~~**U8**~~ | ✅ **2026-09-19 已修**（见 §一 第九批）。体积检测**可能静默低估** —— 🔴 **漏报方向，直接触及项目红线「少报最危险」** | ① 单包 HTTP 非 2xx → `{ bytes: 0 }`（`bundle-size.ts:59`）；catch（超时 / 网络失败）→ 同样 `{ bytes: 0 }`（`:67`）—— **两条路径都不打日志** ② `rows.filter(r => r.bytes > 0)` 把这些 0 **直接丢掉**（`:71-73`）→ `totalBytes` **少算**（`:75`）③ `packageCount: packages.length` **只数成功的**（`:80`）→ UI 那句「顶层依赖 N 个」（`page.tsx:354`）在部分失败时会**少报包数** | **(a) 把失败计数暴露出来**（"N 个包查询失败，数据不完整"）；**(b) 与 `exceeded` 门禁联动时给"数据不完整"标记** —— ⚠️ **否则"没超阈值"可能只是"压根没查全"**。与 `enrichUncertain` / `enrichSecurity` 的"静默降级"口径**冲突**：那些是"少一块不影响主结论"，这里是**在同一块里给了一个偏小的数**（性质更重） |
+| ~~**U9**~~ | ✅ **2026-09-19 已修**（见 §一 第九批）。**"查失败"在报告页不可见** —— 部分失败时没有任何提示 | `security/index.ts:24-39` 两个扫描走 `Promise.allSettled`，失败只 `console.error`（**只有服务器日志能看到**）；UI 端 `page.tsx:305` 是 `{r.vulnerabilities && (…)}` → CVE 扫描失败时**整块不渲染**，读者只能靠"**怎么少了一块**"去反推 | 卡片里加**显式状态行**（如"漏洞扫描：未产出"），**不要靠缺块暗示**。📌 参照物的差距：E2E 校验清单 `docs/reports/E2E-VERIFICATION-2026-09-16.md` 的 `A10` 明确要求「非 npm 项目或失败时**明确记「未产出」**」—— **报告页目前没有做到这一条** |
 
 > ⚠️ 另有一条属**口径失真**（非功能缺失），并入 **U7 的 (a) 零成本修正**：
 > 字段名 `bundleSize` / 页面标题「构建体积」量的其实是 npm 上的 `dist.unpackedSize`（**整包解包后的大小**），
@@ -619,7 +647,7 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 | # | 条目 | 现状与证据（真实代码 + 行号） | 规划方向（待对齐，未实施） |
 |---|---|---|---|
-| **U10** | **引擎只比较「对外接口」，函数体内部实现改动完全不可见** —— 且**文档从未声明这条边界** | ① `signature()`（`worker/analyze-core.cjs:587`；函数分支 `functionSignatureText` `:576-583`）= `「async 」function(参数类型序列):返回类型` —— 🔴 **函数体根本不在签名里** ② `diffSymbols` 的判定是 `(signature(o) !== signature(n) \|\| o.type !== n.type)`（`:642`）→ 函数体改动**两条都相同** → **不产出 `modified` 条目** ③ 后果链：该符号不进变更集 → 规则引擎无输入 → AI 无输入 → **影响链路里没有它** → **全程静默**（连"这里变过"都不留痕） | **(a) 零成本（建议做）** —— 在 `product.md` 的边界/不做什么一节或 README 写一行声明：「**本工具判断的是「对外接口（契约）」是否变化；函数体内部实现改动不产生影响链路条目 —— 即使其行为可能变化**」。**(b) 可选** —— 报告页脚注同款说明。**(c) 不建议** —— 真做行为分析（需执行或符号推理，成本量级完全不同） |
+| ~~**U10**~~ | ✅ **2026-09-19 已修（(a)+(b) 两条都做了）**（见 §一 第九批）。~~**引擎只比较「对外接口」，函数体内部实现改动完全不可见**~~ —— ~~且**文档从未声明这条边界**~~ | ① `signature()`（`worker/analyze-core.cjs:587`；函数分支 `functionSignatureText` `:576-583`）= `「async 」function(参数类型序列):返回类型` —— 🔴 **函数体根本不在签名里** ② `diffSymbols` 的判定是 `(signature(o) !== signature(n) \|\| o.type !== n.type)`（`:642`）→ 函数体改动**两条都相同** → **不产出 `modified` 条目** ③ 后果链：该符号不进变更集 → 规则引擎无输入 → AI 无输入 → **影响链路里没有它** → **全程静默**（连"这里变过"都不留痕） | **(a) 零成本（建议做）** —— 在 `product.md` 的边界/不做什么一节或 README 写一行声明：「**本工具判断的是「对外接口（契约）」是否变化；函数体内部实现改动不产生影响链路条目 —— 即使其行为可能变化**」。**(b) 可选** —— 报告页脚注同款说明。**(c) 不建议** —— 真做行为分析（需执行或符号推理，成本量级完全不同） |
 
 **为什么这是边界、不是 bug（诚实记录）**：所有"破坏性变更检测"工具都只划**契约**这条轴 ——
 改函数体不算 breaking change，这是业界通用口径（即 `semver` 语义化版本那套「哪一位该进位」的判据）。
@@ -683,6 +711,31 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 **🔴 连带查出的一处漏修**：`README.md` 目录树 `prisma/` 行仍写「schema（**5 张表**）」，实际 `prisma/schema.prisma` 只有 **4 个 `model`**（`feedbacks` 已随 PR #23 删除）。
 → §一 第八批 **U1** 当时按 `architecture.md` 修了 4 处，**漏了 `README.md` 这第 5 处** —— 与第六批 T1/T2 同族（**按精确短语 grep 修，会漏掉换措辞的同类**：U1 找的是「5 张表」+`feedbacks`，README 那句只有「5 张表」没带表名）。
 → ✅ 本次已修为「4 张表」；复测口径同 U1：`git grep -n "张表" -- '*.md'`。
+
+---
+
+### 18. 2026-09-19 全功能复跑的「未验项」点名（**从报告搬进台账** —— 埋在报告里等于没有）
+
+> 来源：`docs/reports/E2E-RERUN-2026-09-19.md` §8.1。
+> 🔴 **为什么必须搬**：那份报告当时**未入库**；且即便入库，「下轮要补什么」属**活跃待办**，不是历史证据。
+> 教训与 §一 第九批的元教训同源：**结论写在报告里 = 下次清点找不到**。
+
+| 项 | 原因 | 下轮怎么做 |
+|---|---|---|
+| B3 并发上限 3 | 未构造 4+ 并发 | 连发 5 个任务，观察是否只跑 3 个 |
+| B4 超时取消 / `failed` 态 | 未构造失败输入 | 造一个 `baseRef` 不可达的任务 |
+| D2 `FileSnapshot` 缓存命中 | 该轮 `cacheHits=0` | 同仓库同 commit 跑两次，看第二次是否命中 |
+| **`github-push` 事件源** | 只造了 MR / PR payload | 补一份 push payload（含 `before` / `after` / `ref`）；操作步骤见仓库外 `学习笔记/code-guardian/补验-github-push-操作步骤.md` |
+| webhook 无事件头兼容路径 | 属向后兼容分支（`route.ts:78`） | 发不带 `X-GitHub-Event` / `X-Gitlab-Event` 的请求 |
+| `npm run seed` / `create-fixture.sh` | 该轮 fixture 是手工造的 | 跑一次官方脚本，确认能复现 `fixtures/sample-repo` |
+| 渲染层截图 | 无 UI 断言手段 | 至少对详情页五块各截一张（hydration 已于 2026-09-19 用真实浏览器验过） |
+| Monaco 离线化（D4） | 与那轮范围无关 | 台账既有条目 §二.2 |
+| fork 仓库 PR | 代码注释声明为 M2 已知边界 | M5 前补齐 |
+
+> ⚠️ 另一条**口径自纠**（同报告 §8，一并记账避免重复判断）：文档口径「**25 规则**」**已自证（2026-09-19 核）** ——
+> `worker/rules.cjs` 的 `RULE_TABLE` 实际 = **25 个具名 label + `unknown` 兜底**（共 26 项），与 README / architecture / product 写的「25 条查表规则 + unknown 兜底」**一致**。
+> 早先担心的「34 处 `severity` 赋值」是统计口径差异：**全文件** `severity:` 字面量还含 `runRules` 内 `renamed` / `removed` / `added` 分支的内联 result 对象，与 RULE_TABLE 的具名条目不是同一口径，**不是矛盾**。
+> 结论：**README 的 25 条口径正确，无需改**；改规则后用 `node -e "Object.keys(RULE_TABLE).filter(k=>k!=='unknown').length"` 复点。
 
 ---
 

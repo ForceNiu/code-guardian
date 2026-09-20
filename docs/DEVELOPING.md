@@ -33,6 +33,23 @@ npm run scan . main~5 main            # 扫自己
 - 全链路（起 dev + 真前端 + 真库）验「**接上 DB / HTTP / 前端**还跑不跑得动」。
 - **引擎大改之后必须重跑全链路** —— 2026-09 曾出现「引擎单测与 scan 全绿，但全链路结论已过期 13 天」。
 
+### 1.1 AI 成本口径（复跑实测，别再翻报告找）
+
+> 这两条来自 2026-09-16 / 2026-09-17 两轮全链路复跑。**报告已于 2026-09-19 移出本仓库**（归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`），
+> 因属**长期有效的环境知识**，把结论搬到这里，免得下次又去翻已归档的报告。
+
+- **AI 调用数 = 2 × 触发了 AI 的任务数**，**与 `uncertain` 条数无关**（条数只影响 prompt 大小与耗时）。依据：`src/lib/ai/semantic-graph.ts` 的 `predict` / `suggest` 每任务各调一次 LLM（固定 2 次）。
+- **排期档位（DeepSeek）**：高峰 = 北京时间**工作日 9:00–12:00 / 14:00–18:00**（其余时段**半价**）；**整批调用**按触发时刻算一次，不是按条目分次。
+- **零成本轮次可随时跑**：只要输入 0 个 `uncertain`（规则引擎兜住了），AI 调用数 = 0，与时段无关。
+
+### 1.2 复跑中「看起来异常、实际正常」的备案（避免下次误判）
+
+| 现象 | 结论 | 依据 |
+| :--- | :--- | :--- |
+| `prisma:error / Unique constraint failed on (repo_id, mr_id, commit_sha)` | ✅ **正常**。`enqueueTask` 靠「先插入 → 撞唯一键 → 捕获 P2002 → 返回 duplicate」实现幂等；Prisma 会把这次失败插入打到 stderr（**预期噪音**） | 同一次重复请求返回 `200 duplicate`、taskId 不变 |
+| `summary.cacheHits` 非 0（如 39） | ✅ **正常**。增量缓存命中未变更文件：`totalFiles − changedFileCount` 算术闭合 | 与历史口径一致 |
+| 耗时比上一轮快 | ✅ **正常**。缓存命中 + 无 AI 往返（0 uncertain 输入） | 零 AI 往返比有往返快 |
+
 ---
 
 ## 2. 项目红线（违反会出事）
@@ -77,8 +94,9 @@ npm run scan . main~5 main            # 扫自己
 12. 🔴 **公开仓库的 PII 红线 = 「本地元数据」，不是「别的项目源码」**。
     本仓库是 PUBLIC（被分析的 interview-forge / failwatch 同样 PUBLIC），所以内嵌别项目源码
     **不算泄漏**；真正要防的是：**`/Users/<用户名>` 绝对路径、内网 IP、localhost 端口、临时路径**。
-    - **`docs/reports/e2e-logs/` 整体 gitignore、一条都不入库**（其中含原始日志/截图，是本机跑一次的产物，
-      第三方无法独立复现；结论由 `docs/reports/E2E-VERIFICATION-*.md` 承接 + `npm run scan` 可复跑）。
+    - **`docs/reports/` 下的原始 dump（`e2e-logs/`）与历史复跑报告** 均已移出本仓库（2026-09-19）：
+      原始 dump 本就 gitignore、不入库；5 份复跑/审计报告归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`，
+      结论由本文件 §1.1 / §1.2 承接 + `npm run scan` 可复跑）。
     - ⚠️ **排除某个文件/目录后，必须全仓 grep 它被引用的每一处** —— 曾漏掉 `README.md` 里指向它的链接
       → GitHub 上 404。改方案 = 改引用，两件事必须一起做。
     - 核「提交里有没有敏感串」**要看新增行**：`git diff main..HEAD | grep -E '^\+' | grep -E '<pat>'`；
@@ -158,11 +176,12 @@ scripts/
   create-fixture.sh    fixture 生成
 docs/
   architecture.md      架构与规则口径
-  product.md           产品说明
+  product.md           产品说明（+ §10 已知边界，判读报告前必读）
   AUDIT-BACKLOG.md     审计清单唯一归属地（做 / 不做 / 待定三态）—— **状态一变就改它**
   DEVELOPING.md        本文件（红线 / 方法论 / 文件地图）
-  frontend-redesign.md 前端视觉设计原则
-  reports/             审查报告 + 端到端验证结论（e2e-logs/ 原始 dump 不入库）
+  # 注：历史审查 / 复跑报告（frontend-redesign.md、reports/ 下 5 份）
+  # 已于 2026-09-19 移出本仓库，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`。
+  # 其中成本口径与「看起来异常实际正常」备案已搬进本文件 §1.1 / §1.2。
 tests/
   *.test.cjs / *.test.ts   node:test 单测 17 个文件（CI 第三道门禁）
 LICENSE                  MIT / Copyright (c) 2026 ForceNiu
