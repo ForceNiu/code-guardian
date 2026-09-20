@@ -267,6 +267,29 @@ prisma 5 表 / LangGraph 4 节点（名称与顺序都对）/ `DEVELOPING` 的�
 
 ## 二、🔜 待做（按执行顺序）
 
+### 待做收敛版（2026-09-20 重梳 · 新编号）
+
+> 依据「少报最危险」红线 + 成本收益 + 是否引入 churn 重新判定。旧 §二.0–§二.18 的逐条明细保留为执行史，以本节新编号为准。
+> 目标：把悬而未决的清单收敛成「4 条真做 + 其余关闭/延后」，项目进入稳定态。
+> **定位定调**：本工具为 **TS/JS 栈影响链路分析**（不含 .vue），该范围须显式声明（见 A1）；不为验证项目过度扩到跨语言。
+
+#### A 组 · ✅ 已全部实现（磁盘，未提交 · 2026-09-20）
+| 新号 | 事项 | 落点 |
+|---|---|---|
+| A1 | 声明解析器范围 = **TS/JS only，不含 .vue** | `README.md` 已知边界表 + 导语 |
+| A2 | 加 `decorators-legacy` | `worker/analyze-core.cjs` |
+| A3 | `.env.example` 补 `HTTP_PROXY`/`HTTPS_PROXY` | `.env.example` |
+| A4 | 删/改无出处百分比（"80%/20%"、"月 $200"） | `docs/product.md` + `docs/architecture.md` |
+
+#### B 组 · 已关闭并移出待办（2026-09-20）
+> 9 项关闭：S7/ST3 目标文件已归档失效；D4/S10/T7/ST4/U7(c)(d) 判 won't-fix；§二.18 未验项归入下轮 E2E；B1/B2/E4/P2①/P2② 维持 won't-fix。**理由保留在各自原条目（§二.x / §三），此处不再逐条占位。**
+
+#### C 组 · ✅ 已处置（2026-09-20）
+| 新号 | 原 ID | 处置 |
+|---|---|---|
+| C1 | §四.1 GitLab Commit Status 回写验证 | ✅ 关闭为「外部依赖，当前环境不可验」（缺 token + 真实项目，非代码缺陷） |
+| C2 | §四.2 AI 引擎真实仓库可达性 | ✅ 已如实写进文档（`product §10.4` + README 边界表）：真实语料 0 `uncertain` → AI 不触发，属预期；不补样本 |
+
 ### 0. ✅ 收口分支 `fix/audit-tier1-3` —— **已合并**（main = `30c7dbb`）
 
 - ✅ PR **#17**（https://github.com/ForceNiu/code-guardian/pull/17）squash merge 完成，CI 全绿。
@@ -758,12 +781,12 @@ src/instrumentation.ts:5   TS2339: Property 'startScheduler' does not exist ... 
 
 ---
 
-## 四、❓ 待定
+## 四、✅ 已处置（原「待定」于 2026-09-20 收口）
 
-| # | 条目 | 缺什么前置 |
+| # | 条目 | 处置 |
 |---|---|---|
-| 1 | GitLab Commit Status 回写验证 | 需要 `GITLAB_TOKEN` + 一个真实 GitLab 项目。缺口只剩最后一跳（R2 已证明 `gitlabProjectId` 能正确落库） |
-| 2 | **AI 语义引擎在真实仓库上的可达性**（2026-09-17 复跑查出） | 需要判断：这是「**符合预期**（A3 治好了 0参→有参 那类白烧 token 的形态）」还是「**规则兜底面收窄过头**」。事实：三个真实仓库 × 4 类窗口（`main~20`/`main~21`/`HEAD~10`/`HEAD~20`/`db04dd7~5`/`db04dd7~10`）**全部 0 uncertain**，AI 路径只由合成 fixture 触发。**证据**：`docs/reports/E2E-RERUN-2026-09-17.md` §3。缺的前置是**一条决策**：要不要为「真实仓库里规则兜不住的形态」补样本（进「形态矩阵登记表」）；不补则需在文档里明写「AI 引擎在当前真实语料上不触发」 |
+| 1 | GitLab Commit Status 回写验证 | ✅ **关闭为「外部依赖，当前环境不可验」**：缺 `GITLAB_TOKEN` + 真实 GitLab 项目（非代码缺陷）。回头条件：拿到 token + 真实项目时补验（R2 已证明 `gitlabProjectId` 能正确落库） |
+| 2 | **AI 语义引擎在真实仓库上的可达性** | ✅ **已如实写进文档**：判定为「**符合预期**」（A3 治好了白烧 token 的形态），**不为它补样本**。文档落点：`docs/product.md §10.4` + README 已知边界表。事实：三真实仓库 × 多窗口全部 0 `uncertain`，AI 仅由合成 fixture 触发；证据 `E2E-RERUN-2026-09-17.md` §3 |
 
 ---
 
