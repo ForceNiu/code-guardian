@@ -282,7 +282,7 @@ function isSignatureBearing(node) {
  * 把 Babel 解析失败归类（U5，2026-09-19）。
  *
  * 此前 catch 一律返回三个空数组，三种性质完全不同的情况在报告上**长得一模一样**：
- *   ① "unsupported" —— **我们的能力边界**（没开对应插件：装饰器 / .vue / 新语法）
+ *   ① "unsupported" —— **我们的能力边界**（没开对应插件：pipeline 运算符等实验语法）
  *   ② "syntax"      —— **用户代码本身有语法错误**
  *   ③ "empty"       —— 空文件
  * ① 需要我们去补能力，② 是使用者的问题，混为一谈等于把"我们不支持"伪装成"没问题"。
@@ -290,7 +290,7 @@ function isSignatureBearing(node) {
  */
 function classifyParseError(err) {
   const msg = (err && err.message) || "";
-  // Babel 对未启用插件的典型措辞：「This experimental syntax requires enabling the parser plugin: decorators」
+  // Babel 对未启用插件的典型措辞：「This experimental syntax requires enabling the parser plugin: "pipelineOperator"」
   if (/requires enabling|parser plugin|experimental syntax|Cannot use import statement/i.test(msg)) {
     return "unsupported";
   }
@@ -307,7 +307,8 @@ function parseFile(code) {
   try {
     ast = parser.parse(code, {
       sourceType: "unambiguous",
-      plugins: ["typescript", "jsx"],
+      // typescript+jsx 覆盖本工具的 TS/JS 解析范围；decorators-legacy 解锁 Angular/NestJS/TypeORM 的 @装饰器 项目，否则整文件进 catch 被静默跳过
+      plugins: ["typescript", "jsx", "decorators-legacy"],
     });
   } catch (err) {
     return { exports, imports, reexports, parseError: classifyParseError(err) };

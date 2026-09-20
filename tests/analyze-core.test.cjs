@@ -168,11 +168,17 @@ test("parseFile 对空代码 / 非法代码安全降级为空（U5：并带失�
   assert.deepEqual(bad.exports, []);
   assert.equal(bad.parseError, "syntax");
 
-  // 🔴 U5 的关键：装饰器属于「我们没开插件」= "unsupported"，
+  // 🔴 U5 的关键：「我们没开插件」= "unsupported"，
   //    必须与「你代码有语法错」区分开 —— 前者要我们去补能力，后者不是我们的锅。
   const decorated = parseFile("@Component({ selector: \"x\" })\nexport class Foo {}");
-  assert.deepEqual(decorated.exports, []);
-  assert.equal(decorated.parseError, "unsupported");
+  // 装饰器已于 2026-09-20 开启 decorators-legacy → 现在能正常解析，不再算 unsupported
+  assert.equal(decorated.parseError, undefined);
+  assert.ok(decorated.exports.some((e) => e.name === "Foo"));
+
+  // 换一个「我们没开插件」的真例子：pipeline 运算符
+  const unsupportedSyntax = parseFile("const x = a |> double;");
+  assert.deepEqual(unsupportedSyntax.exports, []);
+  assert.equal(unsupportedSyntax.parseError, "unsupported");
 
   // 正常代码不应带 parseError
   const ok = parseFile("export const a = 1;");
