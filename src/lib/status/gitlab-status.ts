@@ -3,6 +3,7 @@
 
 import type { Task, Repository } from "@prisma/client";
 import type { AnalysisResult } from "@/lib/types";
+import { getConfig } from "@/lib/config";
 
 export type CommitStatusState = "pending" | "running" | "success" | "failed" | "canceled";
 
@@ -65,7 +66,7 @@ export async function reportGitLabStatus(
   fetchImpl: typeof fetch = fetch,
 ): Promise<boolean> {
   if (task.source !== "gitlab-mr" || !task.gitlabProjectId) return false;
-  const token = process.env.GITLAB_TOKEN;
+  const token = getConfig().gitlabToken;
   if (!token) return false;
 
   let host: string;

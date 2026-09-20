@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { enqueueTask } from "@/lib/enqueue";
+import { getConfig } from "@/lib/config";
 import { safeEqual } from "@/lib/webhook-adapters";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +53,7 @@ const ManualSchema = z.object({
 const MANUAL_TRIGGER_HEADER = "x-manual-trigger-token";
 
 export async function POST(req: NextRequest) {
-  const expected = process.env.MANUAL_TRIGGER_TOKEN;
+  const expected = getConfig().manualTriggerToken;
   if (!expected) {
     return NextResponse.json(
       { error: "手动触发已禁用：未配置 MANUAL_TRIGGER_TOKEN（fail-closed，请先设置该环境变量）" },
