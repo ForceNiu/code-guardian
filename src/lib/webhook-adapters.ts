@@ -141,8 +141,10 @@ const GitHubPrSchema = z.object({
 /**
  * GitHub PR → 统一格式。
  * baseRef = base.sha，headRef/commitSha = head.sha，mrId = PR number。
- * 注意：fork 出的 PR，head.sha 不在目标仓库内，worker 需要额外 fetch 来源 fork，
- * 当前 M2 按同仓 PR 实现（这是已知边界，M5 前补齐 fork 支持）。
+ * ⚠️ **已知边界：只支持同仓 PR，不支持 fork PR**（2026-09-20 更正措辞 —— 原写「M5 前补齐」，
+ * 但 M5 已交付而 fork 支持从未纳入范围，故改为如实声明为边界，不再挂「待补齐」）。
+ * fork 出的 PR，head.sha 不在目标仓库内 → worker 的 `git checkout --force <sha>` 不可达 →
+ * 任务落 `failed`（属「响的」失败，不会静默产出错报告）。要支持需额外 fetch 来源 fork。
  */
 export function adaptGitHubPr(payload: unknown): AdaptResult {
   const parsed = GitHubPrSchema.safeParse(payload);
