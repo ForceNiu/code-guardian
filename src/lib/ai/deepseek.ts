@@ -15,6 +15,7 @@ import http from "node:http";
 import net from "node:net";
 import tls from "node:tls";
 import https from "node:https";
+import { getConfig } from "@/lib/config";
 
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEEPSEEK_MODEL = "deepseek-v4-flash";
@@ -115,7 +116,7 @@ function httpsViaProxy(
   signal?: AbortSignal,
   timeoutMs = 300000,
 ): Promise<ProxyResp> {
-  const proxy = (process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "").replace(/^https?:\/\//, "");
+  const proxy = getConfig().proxy ?? "";
   if (!proxy) {
     return httpsDirect(url, method, headers, body, signal, timeoutMs);
   }
@@ -273,7 +274,7 @@ export class DeepSeekLLM {
 
 /** 从环境变量读取 key 并创建 LLM；无 key 返回 null（调用方降级处理） */
 export function createLLM(): DeepSeekLLM | null {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const apiKey = getConfig().deepseekApiKey;
   if (!apiKey) return null;
   return new DeepSeekLLM(apiKey);
 }

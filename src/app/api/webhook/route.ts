@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { enqueueTask } from "@/lib/enqueue";
+import { getConfig } from "@/lib/config";
 import {
   adaptWebhook,
   detectEvent,
@@ -30,7 +31,7 @@ function enqueueError(err: unknown) {
  */
 export async function POST(req: NextRequest) {
   const headers = req.headers;
-  const secret = process.env.WEBHOOK_SECRET;
+  const secret = getConfig().webhookSecret;
   const rawBody = await req.text().catch(() => null);
   if (rawBody === null) {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
