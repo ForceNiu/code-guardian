@@ -215,7 +215,7 @@ async function processTask(task: Task, ctrl: { cancelled: boolean }) {
       );
     }
   } catch (err) {
-    const message = err instanceof Error ? `${err.message}\n${err.stack?.slice(0, 500) ?? ""}` : String(err);
+    const message = err instanceof Error ? err.message : String(err);
     await prisma.task.update({
       where: { id: task.id },
       data: { status: "failed", errorMessage: message },
