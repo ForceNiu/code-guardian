@@ -109,7 +109,7 @@
 | :--- | :--- |
 | 确定性规则 | 25 条查表（函数签名 10 类 / type/interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类）+ `unknown` 兜底 |
 | AI 语义引擎 | LangGraph 4 节点管线（重述→检索→预测→建议），DeepSeek |
-| 单元测试 | 250 个，全绿（`npm test` 实测；用例数复测 `grep -h -c "^test(" tests/*.test.cjs tests/*.test.ts \| paste -sd+ - \| bc`；**此数随开发增长，用前复测**） |
+| 单元测试 | 271 个，全绿（`npm test` 实测；用例数复测 `grep -h -c "^test(" tests/*.test.cjs tests/*.test.ts \| paste -sd+ - \| bc`；**此数随开发增长，用前复测**） |
 | CI 门禁 | `lint → typecheck → test → build` 四道，全绿 |
 | 依赖 CVE 数据源 | npm Bulk Advisory（完整依赖树，含传递依赖） |
 | 体积门禁阈值 | 累计 unpackedSize 100MB（**只统计顶层直接依赖**，不含传递依赖；口径见 §10.3） |
@@ -127,7 +127,7 @@
 | M3 规则引擎 | 25 条查表规则（`RULE_TABLE`，另含 `unknown` 兜底）+ LangGraph 双轨 | ✅ 已实现 |
 | M4 前端联调 | SSE 实时进度 + Monaco Diff + 任意 head | ✅ 已实现 |
 | M5 安全门禁 | CVE 扫描 + 体积门禁 + GitLab 状态回写 | ✅ 已实现 |
-| 未来（可选） | 部署上线（Vercel + Neon）、真实 GitLab **实例**验证（协议层已用本地假服务验穿，见 `AUDIT-BACKLOG.md` §四.1）、规则扩容、演示录屏 | ⏳ 规划中 |
+| 未来（可选） | 部署上线（Vercel + Neon）、真实 GitLab **实例**验证（协议层已用本地假服务验穿，见 `AUDIT-BACKLOG.md` §三 审计纪律 AUD-3）、规则扩容、演示录屏 | ⏳ 规划中 |
 
 ---
 
@@ -189,7 +189,7 @@ npm run dev                 # 启动（调度器随 instrumentation 自动拉起
 - **漏洞报告**：查询失败时卡片会显示失败警示，**不会**渲染成空白让人误以为「没有漏洞」。
 - 🔴 **两个数字的统计口径不同，不能互相推**：**体积**只算**顶层直接依赖**（`package.json` 的 dependencies ＋ devDependencies，见 `bundle-size.ts`）；**漏洞**扫的是**完整依赖树**（含传递依赖，见 `cve-scan.ts`）。所以「体积没超标」**推不出**「依赖树很干净」——两者统计的不是同一批包。
 
-### 10.4 AI 语义引擎在真实语料上极不触发（C2）
+### 10.4 AI 语义引擎在真实语料上极不触发
 
 AI 语义引擎只在规则引擎判为 `uncertain` 时才送 LangGraph。2026-09-17 全链路复跑实测**三个真实仓库 × 多类窗口全部 0 `uncertain`** ⇒ **AI 路径在真实语料上实际不被触发**，只有合成 fixture 能触发它。
 

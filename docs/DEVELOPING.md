@@ -39,7 +39,7 @@ npm run scan . main~5 main            # 扫自己
 > 这两条来自 2026-09-16 / 2026-09-17 两轮全链路复跑。**报告已于 2026-09-19 移出本仓库**（归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`），
 > 因属**长期有效的环境知识**，把结论搬到这里，免得下次又去翻已归档的报告。
 
-- **AI 调用数 = 2 × 触发了 AI 的任务数**，**与 `uncertain` 条数无关**（条数只影响 prompt 大小与耗时）。依据：`src/lib/ai/semantic-graph.ts` 的 `predict` / `suggest` 每任务各调一次 LLM（固定 2 次）。
+- **AI 调用数 = 2 × 触发了 AI 的任务数**，**与 `uncertain` 条数无关**（条数只影响 prompt 大小与耗时；红线 #11 同此口径）。依据：`src/lib/ai/semantic-graph.ts` 的 `predict` / `suggest` 每任务各调一次 LLM（固定 2 次）。
 - **排期档位（DeepSeek）**：高峰 = 北京时间**工作日 9:00–12:00 / 14:00–18:00**（其余时段**半价**）；**整批调用**按触发时刻算一次，不是按条目分次。
 - **零成本轮次可随时跑**：只要输入 0 个 `uncertain`（规则引擎兜住了），AI 调用数 = 0，与时段无关。
 
@@ -91,7 +91,7 @@ npm run scan . main~5 main            # 扫自己
     理由：分析链路会真调 DeepSeek 产生费用，敞开等于替别人付账。
 11. 🔴 **AI 调用必须排在 DeepSeek 空闲时段**（**空闲单价 = 高峰的一半**）。
     高峰 = 北京时间 **周一至周五 9:00–12:00、14:00–18:00**；其余（含周末全天）为空闲。
-    - 🔴 **AI 调用数 = 2 ×（触发了 AI 的任务数），与 `uncertain` 条数无关**（R4 实测修正）。
+    - 🔴 **AI 调用数 = 2 ×（触发了 AI 的任务数），与 `uncertain` 条数无关**（R4 实测修正；推算见 §1.1）：
       链路：`scheduler.ts:185` → `enrich.ts:17-18`（**有 uncertain 才进入**）→
       `semantic-graph.ts`（**一次** `graph.invoke`，不按条循环）。图里**只有 2 个 LLM 节点**
       （`predict` + `suggest`；`restate`/`retrieve` 是纯函数），全部变更**打包进同一个 prompt**。
@@ -194,7 +194,7 @@ docs/
   # 已于 2026-09-19 移出本仓库，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`。
   # 其中成本口径与「看起来异常实际正常」备案已搬进本文件 §1.1 / §1.2。
 tests/
-  *.test.cjs / *.test.ts   node:test 单测 18 个文件（CI 第三道门禁；复测 `ls tests/*.test.* | wc -l`，**此数随开发增长**）
+  *.test.cjs / *.test.ts   node:test 单测 20 个文件（CI 第三道门禁；复测 `ls tests/*.test.* | wc -l`，**此数随开发增长**）
 LICENSE                  MIT / Copyright (c) 2026 ForceNiu
 .github/workflows/ci.yml lint → typecheck → test → build 四道门禁
 ```
@@ -202,7 +202,7 @@ LICENSE                  MIT / Copyright (c) 2026 ForceNiu
 > 🔴 **`worker/analyze.worker.cjs` 只被「运行时字符串路径」引用**（`src/lib/run-analysis.ts` 的 `const workerPath`、`scripts/scan-repo.cjs` 的 worker 路径），
 > 不是 `import` —— 目的是让它既不进 Next bundle、也不被 Turbopack 改写。
 > **后果：改它的文件名 / 目录名不会有任何编译期报错，只在运行时挂（或更坏：静默跑到旧路径）。**
-> 同步点**两个口径别混**：**只改 `analyze.worker.cjs` 文件名** = **4 处**（上面两个字符串 + `analyze-worker` 测试的构造 + `run-analysis` 测试的断言，全是运行时字符串）；**改 `worker/` 目录名** = **9 处**（再加上 `tsconfig.json` 的 `exclude`、3 个 `.cjs` 的静态 `import` / 别名引用等；全表见 `AUDIT-BACKLOG.md` §一）。⚠️ **一律用命令穷举，别数行号**：`grep -rn 'analyze\.worker\.cjs' --include='*.ts' --include='*.cjs' --include='*.json' .`
+> 同步点**两个口径别混**：**只改 `analyze.worker.cjs` 文件名** = **4 处**（上面两个字符串 + `analyze-worker` 测试的构造 + `run-analysis` 测试的断言，全是运行时字符串）；**改 `worker/` 目录名** = **9 处**（再加上 `tsconfig.json` 的 `exclude`、3 个 `.cjs` 的静态 `import` / 别名引用等）。⚠️ **一律用命令穷举，别数行号**：`grep -rn 'analyze\.worker\.cjs' --include='*.ts' --include='*.cjs' --include='*.json' .`
 > 固定判据：`npm run scan <仓库> <base> <head>` 与基线数字逐项对齐（`analyze-worker.test.cjs` 真起 Worker 线程）。
 
 ---

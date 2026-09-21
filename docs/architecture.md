@@ -48,7 +48,7 @@ code-guardian/
 ├── src/
 │   ├── app/
 │   │   ├── page.tsx           # 首页：任务列表 + 手动触发
-│   │   ├── tasks/[id]/page.tsx# 报告页：步骤/风险/影响链路（SSE 订阅 + 轮询兜底）
+│   │   ├── tasks/[id]/page.tsx # 报告页：步骤/风险/影响链路（SSE 订阅 + 轮询兜底）
 │   │   └── api/
 │   │       ├── webhook/route.ts           # 多源 Webhook 入口（幂等防重）
 │   │       ├── tasks/route.ts             # 列表 + 手动触发
@@ -60,6 +60,9 @@ code-guardian/
 │   │   ├── enqueue.ts          # 入队（靠唯一索引防重）+ 事件发布
 │   │   ├── persist.ts          # 符号缓存落库
 │   │   ├── events.ts           # 进程内事件总线（EventEmitter 挂 globalThis）
+│   │   ├── repo-cache.ts       # 仓库缓存治理（.cache/repos 按最久未用淘汰）
+│   │   ├── config.ts           # 集中配置（getConfig 统一读环境变量）
+│   │   ├── utils.ts            # 通用工具（cn 等）
 │   │   ├── webhook-adapters.ts # 三源适配（GitLab MR / GitHub push / GitHub PR）
 │   │   ├── ai/                 # M3b AI 语义引擎
 │   │   │   ├── deepseek.ts       # DeepSeek 客户端（HTTP 代理 CONNECT 隧道）
@@ -81,8 +84,15 @@ code-guardian/
 │   ├── rules.cjs               # 确定性规则引擎（25 条查表 + unknown 兜底，confidence 三档）
 │   └── analyze.worker.cjs      # Worker：git + AST + 反向索引 + 影响链路
 ├── fixtures/sample-repo/       # 演示用 git 仓库（独立历史）
-├── scripts/create-fixture.sh   # 生成演示仓库
-└── docs/architecture.md
+├── scripts/
+│   ├── create-fixture.sh       # 生成演示仓库
+│   └── scan-repo.cjs           # 扫描演示仓库（CLI 校验）
+└── docs/
+    ├── product.md              # 产品定位 + 技术指标
+    ├── architecture.md         # 架构设计（本文件）
+    ├── DEVELOPING.md           # 开发指南
+    ├── AUDIT-BACKLOG.md        # 审计台账（状态一变就改）
+    └── screenshots/            # 界面截图
 ```
 
 ---
