@@ -25,21 +25,22 @@
 | # | 条目 | 状态 | 备注 |
 |---|---|---|---|
 | git 身份 | 本地 `git user.name/email` 未设（红线面③，推前必设） | 🔜 未获批 | 本地 commit 回落 global，踩红线面③；现靠 Git Data API 规避 |
-| 24 分支 | 24 个远端历史分支待删（未获批） | 🔜 未获批 | `gh api` 量得 25 含 main；删前以 `gh api --paginate .../branches` 复测，tip sha 备份见 `学习笔记/code-guardian/branch-tips-backup-2026-09-21.txt` |
-| 30 引用 | 30 处 `.md:行号` 引用未复核（易漂移） | 🔜 未做 | 脚本判「正常」的软判据，可能含「非空但指错」语义错位；引用约定：改文件先重算其后 `file:line` |
+| 24 分支 | ✅ **已删**（2026-09-22）：24 个历史分支全部删除，远端复测**只剩 `main`** | ✅ 已处置 | 删前已重备份 tip sha：`学习笔记/code-guardian/branch-tips-backup-2026-09-22.txt`（25 行含 main）；复测命令 `gh api --paginate repos/ForceNiu/code-guardian/branches --jq '.[].name'`。⚠️ 本地 `git branch -r` 会残留 stale 远端跟踪引用，**以 `gh api` 实时结果为准** |
+| 30 引用 | 在库 0 可改（2 处 `.md:行号` 为历史证据保留见 L38；原「30 处」是瘦身 + reports 移出前的旧数） | ✅ 已复核 | 全仓 `grep -n '\.md:\d+'` 仅 1 行 2 处，均在 L38，指已删「月 Token $200」claim（T5）；按 L18 约定历史证据保留不动；`tsconfig.json:42`（L53）非 .md、仍准，未计入 |
+| **CVE-自依赖** | 项目**自身依赖链**含 **3 个 high 漏洞**：`prisma` → `@prisma/config` → `deepmerge-ts <8.0.0`（栈耗尽 GHSA-ggr8-5vv4-36mx） | 🔜 待议 | 复测：`npm audit --registry=https://registry.npmjs.org`（⚠️ 默认源 npmmirror **不支持 audit 接口**，必须显式换官方源，否则报 NOT_IMPLEMENTED）。修复需 `npm audit fix --force` → prisma 降到 6.12.0（**破坏性**）→ **未做**。尴尬点：本项目 M5 特性就是扫依赖 CVE，自身却带 3 个 high |
 
 ### 2. 代码与文档收口（S / T 系列，保留位置 + 动作 + 风险）
 | # | 条目（含位置） | 动作 / 风险 |
 |---|---|---|
-| **S7** | `docs/reports/CODE_REVIEW_REPORT.md` 勘误 banner 未覆盖三类过期：① 正文「118 case」（今 238 pass）②「scheduler 仍无单测」（今 13 条）③ 路径仍 `src/worker/*`（今 `worker/`）—— ③ 即全量文本审计的 T6 | banner 补两行：测试规模 / scheduler 状态以 README / 本台账为准；路径已随结构审计搬迁（见 `DEVELOPING.md`）。属「可信度优化」非「错误」，评审会拿它跟 README 数字 / 路径对照 |
-| **S8** | `.env.example` 未列 `HTTP_PROXY` / `HTTPS_PROXY`，而 `deepseek.ts` 刻意读它（绕 undici 不读代理的坑），README 扩展指南还专门写了一段 | 加两行注释说明（可选，非密钥）。代码在意、模板没写，属「文档没跟上设计」 |
-| **S10** | `src/lib/scheduler.ts`（2026-09-20 晚因 P0-2 改动下移 36 行）失败任务 `errorMessage` 拼 `${err.message}\n${err.stack?.slice(0,500)}` → 落库 + 推 SSE → 前端可读到内部堆栈 | 二选一：**保持现状**（则转 §二「明确不做」并写明理由）/ 改为**只落服务端日志**、对 SSE 只发 `err.message` |
+| **S7** | `docs/reports/CODE_REVIEW_REPORT.md` 勘误 banner 未覆盖三类过期：① 正文「118 case」（今 238 pass）②「scheduler 仍无单测」（今 13 条）③ 路径仍 `src/worker/*`（今 `worker/`）—— ③ 即全量文本审计的 T6 | ⛔ **不另立**：报告已于 2026-09-19 移出仓库归档（见顶部「📦 归档声明」），属历史快照，按「执行史不改」不回溯改 banner；其揭示的 3 处过期已在源文档（`README`/`product`/`architecture` 经 PR #38 对齐）与本台账以现行数字 / 路径为准 |
+| **S8** | `.env.example` 未列 `HTTP_PROXY` / `HTTPS_PROXY`，而 `deepseek.ts` 刻意读它（绕 undici 不读代理的坑），README 扩展指南还专门写了一段 | ✅ **已处置**（2026-09-22 复核）：模板实测**已列** —— 见 `.env.example`「出网代理（可选）」段（`HTTP_PROXY=""` / `HTTPS_PROXY=""` + undici 注释），且该文件**未被修改**（HEAD 版本即有）。属**台账漂移**（源已改、台账未同步），与 S7 / ST3 /「30 引用」同族 |
+| **S10** | `src/lib/scheduler.ts`（2026-09-20 晚因 P0-2 改动下移 36 行）失败任务 `errorMessage` 拼 `${err.message}\n${err.stack?.slice(0,500)}` → 落库 + 推 SSE → 前端可读到内部堆栈 | ✅ **已处置（方案 B）**：`scheduler.ts` 改 1 行 → `errorMessage` 只取 `err.message`；DB + SSE 两条前端路径同时堵住；完整堆栈仍由 `console.error` 落服务端日志。🔒 **回归锁已补**（2026-09-22）：`tests/scheduler.test.ts` 新增「回归锁：失败任务的 errorMessage 不得含内部堆栈」—— 反向断言堆栈帧与源码坐标，且落库与 SSE 同一份都查；**经变异测试验证**：把 `err.stack` 加回去该用例必红（补之前是 13/13 全绿、**无守卫**）。⚠️ **已落库的历史堆栈未清**（改代码只堵未来，历史数据需单独处理，**本次不处理，已记录待议**） |
 | **T4** | 「80% 规则 / 20% AI」共 8 处（`product.md` ×6 + `architecture.md` ×2） | ✅ **已处置**：源文档实测已改写 (b) 版（无百分比，A4 / AUD-1 落地）；活文档侧 `rg '80%'` 应 0 命中 |
 | **T5** | 「月 Token 可控 $200 内」（`product.md:101`、`architecture.md:157`） | ✅ **已处置**：源文档已删（A4 / AUD-1）；无测算支撑的金额承诺收益为负 |
-| **T7** | 代码层无覆盖率工具（未装 `c8` / `nyc`，无 coverage script） | 加 `c8` 看真实分支盲区。⚠️ **属流程脚手架类（动 CI / 加工具），按约定需先对齐必要性，不自行引入** |
+| **T7** | 代码层无覆盖率工具（未装 `c8` / `nyc`，无 coverage script） | ✅ **已处置**（2026-09-22，用户批准 3a）：`c8` 已入 devDependencies + 新增 `coverage` script，**未动 CI**。盲区用 `npm run coverage` 量 —— **不写死百分比**（会漂移，见 §三 维护规则「写怎么量」）。⚠️ 附带发现：装后 `npm audit` 报 **3 个 high**，实为 **Prisma 依赖链自带**（`prisma`→`@prisma/config`→`deepmerge-ts <8.0.0`，栈耗尽 GHSA-ggr8-5vv4-36mx），**非 c8 引入**；修复需 `npm audit fix --force` 把 prisma 降到 6.12.0（**破坏性**）→ **未做，待议**（见下方新增条目 `CVE-自依赖`） |
 | **T8** | E2E 证据是快照（09-17 一次运行） | **不另立待办** —— 已由红线「引擎大改后必须重跑全链路」（`DEVELOPING.md` §1）约束；仅登记性质，避免误当永久证明 |
-| **ST3** | 两份审计报告（`TEXT-AUDIT-2026-09-17.md` + `STRUCTURE-AUDIT-2026-09-17.md`）无 markdown 链接指向，只被纯文本提及 | 入库时**顺带**加进 `DEVELOPING.md` 文件地图或 README 文档表（带链接）；不为它单独开改动。⚠️ 此类断言天然自毁（报告写出文件名后即从「零提及」变「被提及」），只写怎么量 |
-| **ST4** | `src/components/ui/card.tsx` 的 `CardHeader` / `CardFooter` / `CardTitle` / `CardDescription` / `CardContent` 全仓从未渲染（仅 `Card` 本体在用） | 倾向**不删**（删能把「未引用导出」24→19，代价是下次要用重新拉）。若真删，属 `src/` 改动 → **必须跑四道门禁**（lint → typecheck → test → build） |
+| **ST3** | 两份审计报告（`TEXT-AUDIT-2026-09-17.md` + `STRUCTURE-AUDIT-2026-09-17.md`）无 markdown 链接指向，只被纯文本提及 | ⛔ **不另立**：两报告已于 2026-09-19 随 `docs/reports/` 移出仓库归档（见顶部「📦 归档声明」）；其独有内容（成本口径 / 复跑备案）已搬入 `docs/DEVELOPING.md` §1.1/§1.2，归档目录路径在台账 L7 已登记，不在仓库内维护链接 |
+| **ST4** | `src/components/ui/card.tsx` 的 `CardHeader` / `CardFooter` / `CardTitle` / `CardDescription` / `CardContent` 全仓从未渲染（仅 `Card` 本体在用） | ⛔ **不删**（2026-09-22 定）：收益仅「未引用导出」24→19，代价是下次要用重新拉，**功能零影响**。若删属 `src/` 改动 → 须跑四道门禁，而 **build 在本地无法验真**（沙箱 safe-delete 守卫拦截 `.next` 清理，阈值 50 / 实际 233 个文件）。回头条件：真要做 UI 扩展、或集中清理未引用导出时 |
 
 ---
 
