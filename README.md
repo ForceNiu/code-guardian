@@ -40,7 +40,7 @@ ESLint 答不上来——它只看语法，不看「谁引用了这个符号」�
 ![影响链路](docs/screenshots/impact-chain.png)
 
 这是整个项目的卖点。每行是一条变更：改动文件 → 导出符号 → 变更类型 → 风险 → 置信度 → **影响文件（引用方）**。
-表上方那行统计说明了分工：**规则引擎 2 条、AI 语义引擎 7 条**——能由规则确定的绝不上 AI。
+表上方那行统计说明了分工：**规则引擎 2 条、AI 语义引擎 7 条**——能由规则确定的绝不上 AI。（示例来自演示 fixture `fixtures/sample-repo`，故意含较多 `uncertain` 变更；真实仓库实测多为 0 `uncertain`，见下方「已知边界」）
 
 > 边界要写清楚：工具判断的是「对外接口（导出签名）」有没有变。函数体内部的实现改动不会产生任何条目——
 > 哪怕行为已经变了。所以「影响链路 0 条」**不等于**「这个改动没有影响」。
@@ -285,17 +285,52 @@ npm run start              # 默认监听 3000
 ## 目录结构
 
 ```
-prisma/            schema（4 张表）+ 迁移 + seed
-src/app/           页面（首页 + 报告页）+ API 路由（webhook / tasks / stream SSE）
-src/lib/           集中配置 · 调度器 · 事件总线 · 入队 · 持久化 · webhook 适配 · ai/ · security/ · 状态回写 · 类型 · run-analysis（主线程侧）
-worker/            Worker 线程侧引擎（AST 核心 + 规则引擎 + git + 反向索引 + 影响链路）—— **有意放在 `src/` 之外**：不进 Next bundle、不参与 tsc
-src/components/    状态步骤 · 风险总览 · 影响链路表 · Monaco Diff
-tests/             node:test 单测（分析核心 / 规则引擎 / AI 图谱 / DeepSeek 客户端 / 安全门禁及其集成层 / webhook 适配 / 入队与持久化 / worker 生命周期 / 调度编排）
-scripts/           fixture 生成 + 真实仓库核验（`scan-repo.cjs`）
-fixtures/          演示用 git 仓库
-docs/              产品文档(含 §10 已知边界) · 架构文档 · 开发须知(DEVELOPING: 红线/方法论/文件地图) · 审计台账(AUDIT-BACKLOG)
-docs/screenshots/  本 README 引用的界面截图
-.github/           CI（lint → typecheck → test → build 四道门禁，单 job）
+code-guardian/
+├── prisma/                         # schema.prisma（4 张表）+ migrations/ + seed.ts
+├── src/
+│   ├── app/                        # Next.js App Router
+│   │   ├── page.tsx                # 首页
+│   │   ├── tasks/[id]/page.tsx     # 报告页（单任务影响报告）
+│   │   ├── api/                    # webhook/route.ts + tasks/（route.ts + [id] SSE 进度流）
+│   │   ├── layout.tsx              # 根布局
+│   │   └── globals.css             # 全局样式
+│   ├── lib/                        # 主线程侧核心
+│   │   ├── ai/                     # DeepSeek 客户端 + 语义图谱（enrich/semantic-graph/deepseek）
+│   │   ├── security/               # 安全门禁（bundle-size/cve-scan/dependency-manifest）
+│   │   ├── status/                 # 状态回写（gitlab-status）
+│   │   ├── config.ts               # 集中配置
+│   │   ├── scheduler.ts            # 调度器
+│   │   ├── events.ts               # 事件总线
+│   │   ├── enqueue.ts              # 入队
+│   │   ├── persist.ts              # 持久化
+│   │   ├── prisma.ts               # Prisma 客户端
+│   │   ├── repo-cache.ts           # 仓库缓存 / 工作区管理
+│   │   ├── webhook-adapters.ts     # webhook 适配（四步分发）
+│   │   ├── run-analysis.ts         # run-analysis（主线程侧编排）
+│   │   ├── types.ts                # 类型定义
+│   │   └── utils.ts                # 工具函数
+│   ├── components/                 # UI 组件
+│   │   ├── ui/                     # 组件库（基础组件）
+│   │   ├── StatusSteps.tsx         # 状态步骤
+│   │   ├── RiskSummary.tsx         # 风险总览
+│   │   ├── ImpactTable.tsx         # 影响链路表
+│   │   └── DiffViewer.tsx          # Monaco Diff 视图
+│   └── instrumentation.ts          # Next 启动钩子
+├── worker/                         # Worker 线程引擎（不进 Next bundle / 不参与 tsc）
+│   ├── analyze-core.cjs            # AST 核心 + 规则引擎 + git + 反向索引 + 影响链路
+│   ├── analyze.worker.cjs          # Worker 入口（originOf/resolveExportOrigin 穿透）
+│   └── rules.cjs                   # 定级规则（RULE_TABLE）
+├── tests/                          # node:test 单测（分析核心/规则引擎/AI 图谱/DeepSeek/安全门禁/webhook/入队持久化/worker/调度）
+├── scripts/                        # create-fixture.sh（造 fixture）+ scan-repo.cjs（真实仓库核验）
+├── fixtures/                       # 演示用 git 仓库（sample-repo/）
+├── docs/
+│   ├── screenshots/                # 本 README 引用的界面截图（8 张）
+│   ├── product.md                  # 产品文档（含 §10 已知边界）
+│   ├── architecture.md             # 架构文档
+│   ├── DEVELOPING.md               # 开发须知：红线 / 方法论 / 文件地图
+│   └── AUDIT-BACKLOG.md            # 审计台账（开放挂账 · won't fix · 维护规则）
+└── .github/
+    └── workflows/ci.yml            # CI 四道门禁（lint → typecheck → test → build，单 job）
 ```
 
 详见 [产品文档](docs/product.md) 与 [架构文档](docs/architecture.md)。
@@ -352,7 +387,7 @@ docs/screenshots/  本 README 引用的界面截图
 ## 贡献
 
 这个项目的规则引擎是一张**查表**——`worker/rules.cjs` 里的 `RULE_TABLE` 决定了一类变更算「高危」还是「低危」。
-表里覆盖的变更类型是有限的：函数签名 10 类、type/interface 字段 8 类、enum 成员 2 类、class 成员 5 类。
+表里覆盖的变更类型有限（具体分类见上方「核心能力」表的「确定性规则引擎」一行）：
 
 **如果你遇到了表里没有的变更类型**（比如某个框架特有的导出模式），欢迎提 PR 加一条规则。
 判断标准只有一个：**能由规则算准的，就不要让它掉进 `uncertain`**——那既慢又贵。
