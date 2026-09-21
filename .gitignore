@@ -19,6 +19,10 @@ prisma/*.db
 # runtime caches
 .cache/
 
+# 覆盖率产物（c8 生成：`npm run coverage` 跑一次即有，属本地产物不入库。
+#      与 docs/reports/e2e-logs/ 同理 —— 价值是「确实量过」，不是「可供复验」）
+coverage/
+
 # demo fixture（自带独立 git 历史，不进外层仓库）
 fixtures/
 
