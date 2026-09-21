@@ -258,6 +258,22 @@ function statuses(): string[] {
 // 启停
 // ---------------------------------------------------------------------------
 
+test("自检：prisma 模块 mock 确实生效（无 DATABASE_URL 时真实实现必炸，这里却能读到我们塞的行）", async () => {
+  resetAll();
+  taskHolder.rows = [makeTask("t1")];
+
+  await runOneTick();
+
+  assert.ok(
+    taskHolder.findManyCalls.length > 0,
+    "prisma.task.findMany 必须被调用 —— 否则说明 mock 没接进来，跑的是真实 Prisma（会连库失败）",
+  );
+  assert.ok(
+    statuses().includes("done"),
+    `任务应走通成功路径才证明没碰真实依赖，实际状态：${JSON.stringify(statuses())}`,
+  );
+});
+
 test("自检：startScheduler 跑了一轮 —— 哨兵任务 id 出现在广播记录里", async () => {
   resetAll();
   taskHolder.rows = [makeTask("TASK-SENTINEL")];
@@ -390,6 +406,35 @@ test("runAnalysis 抛错 → 置 failed 并广播，且 GitLab 回写 failed", a
   assert.deepEqual(statuses(), ["analyzing", "failed"]);
   assert.match(String(taskHolder.updates[1].data.errorMessage), /analysis boom/);
   assert.deepEqual(gitlabHolder.calls, [{ status: "failed" }]);
+});
+
+test("回归锁：失败任务的 errorMessage 不得含内部堆栈（S10 方案 B）", async () => {
+  resetAll();
+  analysisHolder.mode = "throw";
+  taskHolder.rows = [makeTask("t1")];
+
+  await runOneTick();
+
+  const failed = taskHolder.updates.find((u) => u.data.status === "failed");
+  const msg = String(failed?.data.errorMessage ?? "");
+
+  // ① 仍要保留人能看懂的原因（不能修成空串或泛泛的「失败」）
+  assert.match(msg, /analysis boom/);
+  // ② 反向断言：不得出现 V8 堆栈帧（"    at xxx"）
+  assert.doesNotMatch(
+    msg,
+    /\n\s+at\s+/,
+    `errorMessage 不应含堆栈帧，否则等于把内部路径推给前端。实际：${JSON.stringify(msg)}`,
+  );
+  // ③ 反向断言：不得出现「源码文件:行号」这类内部坐标
+  assert.doesNotMatch(
+    msg,
+    /\.(ts|tsx|cjs|mjs|js):\d+:\d+/,
+    `errorMessage 不应含源码坐标。实际：${JSON.stringify(msg)}`,
+  );
+  // ④ SSE 广播出去的那一份同样必须干净 —— 落库与广播共用同一个 message，两条路径都要堵
+  const evt = eventHolder.published.find((p) => p.payload?.status === "failed");
+  assert.doesNotMatch(String(evt?.payload?.errorMessage ?? ""), /\n\s+at\s+/);
 });
 
 // ---------------------------------------------------------------------------
