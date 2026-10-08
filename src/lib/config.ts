@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 // 集中配置：所有环境变量**只在这里读一次**，其余模块一律通过 `getConfig()` 取。
 //
 // 为什么要有这一层（此前的问题）：`process.env.X` 散落在各 route / lib 里，
@@ -29,6 +32,14 @@ export type AppConfig = {
   gitlabToken: string | null;
   /** 出网代理（`HTTPS_PROXY` 优先，其次 `HTTP_PROXY`）。null → 直连。 */
   proxy: string | null;
+  /**
+   * 静态报告渲染 CLI（answer-me-with-html 的 `am.mjs`）的绝对路径。
+   * 解析顺序：`AM_CLI_PATH` 显式填写 → 优先；否则回退到仓库内置
+   * `vendor/answer-me-with-html/am.mjs`（零依赖、随仓库分发，开箱即用）。
+   * 两者都缺失 → null → 「导出静态报告」不可用，接口按 fail-closed 返回 503
+   * （同两个写端点的口径：未配置即拒绝，不静默跳过）。
+   */
+  amCliPath: string | null;
   isProduction: boolean;
 };
 
@@ -46,6 +57,21 @@ function readProxy(): string | null {
   return raw.replace(/^https?:\/\//, "");
 }
 
+/**
+ * 解析静态报告渲染 CLI 路径。
+ * 显式 `AM_CLI_PATH` 优先（允许部署方覆盖版本 / 指向其他路径）；否则回退到仓库内置的
+ * vendored 副本（`vendor/answer-me-with-html/am.mjs`，零依赖、随仓库分发），让功能在任意环境
+ * 开箱即用，不必每台机器手动挂载那个 CLI。
+ * 用 `process.cwd()` 锚定仓库根（`next dev` / `next start` / 测试均从仓库根启动），
+ * 不依赖 `import.meta.url`（Next 打包后路径会变）。vendored 副本也缺失时才返回 null（fail-closed）。
+ */
+function resolveAmCliPath(): string | null {
+  const explicit = blank(process.env.AM_CLI_PATH);
+  if (explicit) return explicit;
+  const vendored = path.join(process.cwd(), "vendor", "answer-me-with-html", "am.mjs");
+  return fs.existsSync(vendored) ? vendored : null;
+}
+
 // 刻意**不做进程内缓存**：读几个 `process.env` 属性是纳秒级操作，在 HTTP 请求里完全不可测，
 // 而缓存会引入一个真实陷阱 —— 改了 env 却读不到新值（单测改 env 就会踩，实测挂了 3 条；
 // 其中一条因此拿到了 token，真的去请求 GitLab 拿到 401）。缓存在这里是纯负资产，故不缓存。
@@ -59,6 +85,7 @@ export function getConfig(): AppConfig {
     deepseekApiKey: blank(process.env.DEEPSEEK_API_KEY),
     gitlabToken: blank(process.env.GITLAB_TOKEN),
     proxy: readProxy(),
+    amCliPath: resolveAmCliPath(),
     isProduction: process.env.NODE_ENV === "production",
   };
 }
