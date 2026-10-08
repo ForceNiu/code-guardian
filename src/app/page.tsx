@@ -36,12 +36,28 @@ const STATUS_BADGE: Record<string, string> = {
   failed: "high",
 };
 
+// ── 列表缓存（模块级，跨路由重挂载存活）──────────────────────────
+// 原因：列表数据来自客户端 fetch，不进 Next Router Cache；组件在路由切换时
+// 卸载 → useState 重置 → 返回列表必现「加载中」。把最近一次结果放在模块作用域，
+// 重挂载首帧即可直接渲染缓存、跳过骨架，再后台静默刷新。
+// 注意：仅存活于 SPA 会话内（整页刷新即清空）——这正是 E1 与 sessionStorage 方案（E2）的区别。
+type TasksCache = { data: TaskRow[]; stats: { total: number; done: number; failed: number }; at: number };
+let tasksCache: TasksCache | null = null;
+const CACHE_TTL = 10_000; // 10s 内视为新鲜，直接复用
+
 export default function Home() {
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  // 首帧即用缓存（若有且未过期）渲染，避免返回列表时闪骨架
+  const [tasks, setTasks] = useState<TaskRow[]>(() =>
+    tasksCache ? tasksCache.data : [],
+  );
   // Hero 三个数字用服务端聚合计数，不用 tasks 窗口 filter ——
   // 列表窗口是 size=50，任务超 50 条后窗口内计数会小于真实值。
-  const [stats, setStats] = useState({ total: 0, done: 0, failed: 0 });
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(() =>
+    tasksCache ? tasksCache.stats : { total: 0, done: 0, failed: 0 },
+  );
+  const [loading, setLoading] = useState<boolean>(() =>
+    !(tasksCache && Date.now() - tasksCache.at < CACHE_TTL),
+  );
   const [form, setForm] = useState({
     gitUrl: "",
     baseRef: "",
@@ -53,15 +69,25 @@ export default function Home() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
+    // 缓存未过期：先同步渲染缓存（跳过骨架），再后台刷新
+    const now = Date.now();
+    if (tasksCache && now - tasksCache.at < CACHE_TTL) {
+      setTasks(tasksCache.data);
+      setStats(tasksCache.stats);
+      setLoading(false);
+    }
     try {
       const res = await fetch("/api/tasks?size=50");
       const data = await res.json();
-      setTasks(data.tasks ?? []);
-      setStats({
+      const next = data.tasks ?? [];
+      const nextStats = {
         total: data.total ?? 0,
         done: data.done ?? 0,
         failed: data.failed ?? 0,
-      });
+      };
+      tasksCache = { data: next, stats: nextStats, at: Date.now() };
+      setTasks(next);
+      setStats(nextStats);
     } catch {
       // 后端未就绪时静默
     } finally {
@@ -412,14 +438,18 @@ export default function Home() {
                           {new Date(t.createdAt).toLocaleString("zh-CN")}
                        </td>
                         <td className="px-6 py-3.5 text-right">
-                          <Link
-                            href={`/tasks/${t.id}`}
-                            className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary"
-                          >
-                            查看报告
-                            <ArrowRight size={14} />
-                         </Link>
-                       </td>
+                          {t.status === "done" ? (
+                            <Link
+                              href={`/tasks/${t.id}`}
+                              className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary"
+                            >
+                              查看报告
+                              <ArrowRight size={14} />
+                            </Link>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">报告未生成</span>
+                          )}
+                        </td>
                      </tr>
                     ))}
                  </tbody>

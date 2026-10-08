@@ -153,6 +153,7 @@ curl -X POST http://localhost:3000/api/webhook \
 | Monaco Diff | 新旧文件左右对比，高亮副作用行 | 从「有影响」落到「影响了哪一行」 |
 | 哈希缓存 | `file_snapshots` 存 MD5，`export_symbols` 存反向索引 | 二次分析只算变更文件，不重扫全仓 |
 | 安全门禁 | CVE 依赖漏洞扫描（npm Bulk Advisory）+ 依赖体积门禁（unpackedSize 累计 + 100MB 阈值）+ GitLab Commit Status 回写 | 不只查代码本身，还查**依赖带来的漏洞与体积** |
+| 静态报告导出 | 报告页「导出静态报告」→ `GET /api/tasks/[id]/export`，把已完成的报告渲染成**单文件 HTML** 下载；默认用仓库内置 vendored CLI 开箱即用，也可填 `AM_CLI_PATH` 覆盖 | 报告能**转发**：贴 MR 评论、发 IM、归档。产物零外部依赖，断网也能打开 |
 
 ### 能力落在哪个文件
 
@@ -167,6 +168,7 @@ curl -X POST http://localhost:3000/api/webhook \
 | Webhook 适配（三种源） | `src/lib/webhook-adapters.ts` |
 | AI 语义引擎 | `src/lib/ai/`（`semantic-graph.ts` 4 节点 + `deepseek.ts`） |
 | 安全门禁 | `src/lib/security/` + `src/lib/status/gitlab-status.ts` |
+| 静态报告导出 | `src/lib/export-report.ts`（稿件生成 + 调 CLI 渲染）+ `src/app/api/tasks/[id]/export/route.ts`（下载端点）+ `vendor/answer-me-with-html/am.mjs`（渲染 CLI，随仓库分发，开箱即用） |
 | 前端报告页 | `src/app/tasks/[id]/page.tsx` + `src/components/` |
 
 ### 关键阈值（改了要重新验证）
@@ -239,6 +241,7 @@ curl -X POST http://localhost:3000/api/webhook \
 | `GITLAB_TOKEN` | — | GitLab Commit Status 回写静默跳过，MR 没有红绿灯 |
 | `WEBHOOK_SECRET` | — | **fail-closed**：不填则该接口返回 503（不再跳过校验），`/api/webhook` 整段不可用 |
 | `MANUAL_TRIGGER_TOKEN` | — | **fail-closed**：不填则 `POST /api/tasks` 返回 503，首页「触发分析」需填此口令 |
+| `AM_CLI_PATH` | — | **开箱即用**：默认回退仓库内置 `vendor/answer-me-with-html/am.mjs`（随仓库分发），不填即启用；填了则覆盖为指定路径（不存在 → 导出接口 503 fail-closed） |
 
 > 🔴 两个写端点（`POST /api/tasks`、`POST /api/webhook`）自 2026-09-16 起均为**安全默认**：
 > **未配置密钥即拒绝**，而不是「未配置即不校验」。因为分析链路会真调 DeepSeek 产生费用，
@@ -307,6 +310,7 @@ code-guardian/
 │   │   ├── repo-cache.ts           # 仓库缓存 / 工作区管理
 │   │   ├── webhook-adapters.ts     # webhook 适配（四步分发）
 │   │   ├── run-analysis.ts         # run-analysis（主线程侧编排）
+│   │   ├── export-report.ts        # 静态报告导出（AnalysisResult → 稿件 → 单文件 HTML）
 │   │   ├── types.ts                # 类型定义
 │   │   └── utils.ts                # 工具函数
 │   ├── components/                 # UI 组件

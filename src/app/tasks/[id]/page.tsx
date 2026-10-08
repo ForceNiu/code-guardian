@@ -209,7 +209,26 @@ export default function TaskDetailPage() {
               创建于 {new Date(task.createdAt).toLocaleString("zh-CN")}
             </p>
           </div>
-          <StatusSteps status={task.status} />
+          <div className="flex flex-col items-stretch sm:items-end gap-3">
+            <StatusSteps status={task.status} />
+            {task.result ? (
+              <a
+                href={`/api/tasks/${task.id}/export`}
+                download
+                className="inline-flex items-center justify-center rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
+                title="导出单文件 HTML（可离线打开、可直接转发）；需服务端配置 AM_CLI_PATH，未配置时返回 503"
+              >
+                导出静态报告
+              </a>
+            ) : (
+              <span
+                className="inline-flex items-center justify-center rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground"
+                title="分析未完成，暂无可导出报告"
+              >
+                报告未生成
+              </span>
+            )}
+          </div>
         </div>
 
         {task.status === "failed" && task.errorMessage && (
@@ -218,6 +237,17 @@ export default function TaskDetailPage() {
           </div>
         )}
       </div>
+
+      {/* 无报告空态 */}
+      {!r && (
+        <div className="rounded-xl border border-border/50 bg-card p-6 shadow-sm mb-6">
+          <p className="text-sm text-muted-foreground">
+            {task.status === "failed"
+              ? "分析失败，暂无可查看的报告。"
+              : "报告生成中，完成后可在此查看影响链路。"}
+          </p>
+        </div>
+      )}
 
       {r && (
         <>
