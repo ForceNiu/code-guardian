@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "AI 代码副作用检测与审查治理平台 —— 在 MR 合并前自动分析变更影响链路",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
