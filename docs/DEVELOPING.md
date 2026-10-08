@@ -14,6 +14,12 @@
 
 ## 1. 怎么验证（改动前后都该跑）
 
+> 🔴 **运行环境必须是 Node 22**：`package.json` 的 `engines.node = ">=22"` ＋ `.nvmrc` = `22`（CI 同版本；nvm 用户 `nvm use` 即可对齐）。
+> ⚠️ 用 **Node 20** 跑 `npm test` 会报约 **41 个 `Invalid URL`**（实测 232/273 通过）—— 那是 Node 实验性
+> 模块 mock 开关（`--experimental-test-module-mocks`）与 `tsx` 加载器的接缝解析不了 `@prisma/client`
+> 一类**子路径导出**模块，**是版本问题，不是套件坏了**；换回 Node 22 即 273/273 全绿。
+> 判「套件坏了」之前，先 `node --version` 并换版本各跑一遍全量 —— 本次曾据此误判并白做一轮迁移。
+
 ```bash
 # 四道门禁 —— 与 CI（.github/workflows/ci.yml）**同一套命令**（沙箱里额外加 env -u NODE_OPTIONS）
 env -u NODE_OPTIONS npm run lint
@@ -174,7 +180,7 @@ src/lib/
   config.ts            集中读环境变量（getConfig / validateConfig）—— 模块顶层**不 throw**：`next build` 会执行顶层代码，校验放启动时
   run-analysis.ts      主线程侧桥：new Worker + 软超时 + terminate() 回收（**会被 Next 打包**）
   persist.ts           结果落库（Prisma 事务 + 批量 deleteMany/createMany）
-  scheduler.ts         任务调度编排（13 条单测，含 7 个 fake；并发上限 3 + 原子认领 + 卡死回收）
+  scheduler.ts         任务调度编排（15 条单测，含 7 个 fake；并发上限 3 + 原子认领 + 卡死回收）
   events.ts            SSE 事件总线
   ai/                  DeepSeek + LangGraph 语义引擎（只判断 uncertain 变更）
   security/            依赖 CVE 扫描 + 构建体积门禁

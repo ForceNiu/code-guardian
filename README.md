@@ -259,7 +259,7 @@ curl -X POST http://localhost:3000/api/webhook \
 
 > ⚠️ 上句的「**单实例**」是硬前提：SSE 进度推送走的是**进程内**事件总线（`src/lib/events.ts`，EventEmitter 挂 `globalThis`）。
 > 横向扩到**多实例 / Serverless** 后，跨实例订阅失效——浏览器可能一直收不到进度更新（任务本身仍会跑完，可刷新看结果），
-> 届时需把它换成 Redis pub/sub。这是已知边界，登记见 `docs/AUDIT-BACKLOG.md`（D11）。
+> 届时需把它换成 Redis pub/sub。这是已知边界（原 D 组 D11 条目已按「历史结案不入库」随 D1~D11 移出本仓库，归档在仓库外 `学习笔记/code-guardian/历史报告-移出/`，见 `docs/AUDIT-BACKLOG.md` 顶部说明）。
 
 ```bash
 npm ci

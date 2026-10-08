@@ -24,10 +24,11 @@
 ### 1. 仓库级
 | # | 条目 | 状态 | 备注 |
 |---|---|---|---|
-| git 身份 | 本地 `git user.name/email` 未设（红线面③，推前必设） | 🔜 未获批 | 本地 commit 回落 global，踩红线面③；现靠 Git Data API 规避 |
+| git 身份 | 本地 `git user.name/email` 未设（红线面③，推前必设） | ✅ **已处置**（2026-10-08） | 实测 `git config user.name`=`niuzhongmin`、`user.email`=`nzmin@foxmail.com`。此前 `.git/config` 的坏值 `email = --global`（`git config user.email --global` 写反作用域所致）已用 `git config user.email nzmin@foxmail.com` 修掉，后续本地提交不再需要 `-c` 覆盖；复测命令即上面两条 `git config` |
 | 24 分支 | ✅ **已删**（2026-09-22）：24 个历史分支全部删除，远端复测**只剩 `main`** | ✅ 已处置 | 删前已重备份 tip sha：`学习笔记/code-guardian/branch-tips-backup-2026-09-22.txt`（25 行含 main）；复测命令 `gh api --paginate repos/ForceNiu/code-guardian/branches --jq '.[].name'`。⚠️ 本地 `git branch -r` 会残留 stale 远端跟踪引用，**以 `gh api` 实时结果为准** |
-| 30 引用 | 在库 0 可改（2 处 `.md:行号` 为历史证据保留见 L38；原「30 处」是瘦身 + reports 移出前的旧数） | ✅ 已复核 | 全仓 `grep -n '\.md:\d+'` 仅 1 行 2 处，均在 L38，指已删「月 Token $200」claim（T5）；按 L18 约定历史证据保留不动；`tsconfig.json:42`（L53）非 .md、仍准，未计入 |
-| **CVE-自依赖** | 项目**自身依赖链**含 **3 个 high 漏洞**：`prisma` → `@prisma/config` → `deepmerge-ts <8.0.0`（栈耗尽 GHSA-ggr8-5vv4-36mx） | 🔜 待议 | 复测：`npm audit --registry=https://registry.npmjs.org`（⚠️ 默认源 npmmirror **不支持 audit 接口**，必须显式换官方源，否则报 NOT_IMPLEMENTED）。修复需 `npm audit fix --force` → prisma 降到 6.12.0（**破坏性**）→ **未做**。尴尬点：本项目 M5 特性就是扫依赖 CVE，自身却带 3 个 high |
+| 30 引用 | 在库 0 可改（**T5 条目**里的 2 处 `.md:行号` 属历史证据，按 L18 保留不动；原「30 处」是瘦身 + reports 移出前的旧数） | ✅ 已复核 | 🔴 **不写死行数 / 行号**（按 §三 维护规则「写怎么量」）：复测 `grep -rn '\.md:[0-9]' docs/ README.md`（⚠️ 本沙箱 bash `grep` 的 `\+` 有**静默假阴性**，**须用 ripgrep**）。2026-10-08 实测 **2 行 3 处**：`T5 条目` 2 处（指已删「月 Token $200」claim，历史证据不动）＋ `GH 回写缺口` 条目 1 处（指向 `product.md` 场景表、带行号，属**现行**引用）。`tsconfig.json:42`（见 `P2①` 条目）非 .md、仍准，未计入 |
+| **CVE-自依赖** | 项目**自身依赖链**含 high/critical 级漏洞，源头链 `prisma` → `@prisma/config` → `deepmerge-ts <8.0.0`（栈耗尽 GHSA-ggr8-5vv4-36mx）。🔴 **数量不写死**（按 §三 维护规则「写『怎么量』而非『量出来多少』」）：2026-09-22 记为「3 个 high」，**2026-10-08 实测 12 条 = high 11 + critical 1**（新增 `next` critical、`sharp`、`brace-expansion`、`braces`、`micromatch`、`fast-glob`、`source-map-js` 等），随新 advisory 持续漂移 | 🔜 待议 | 复测：`npm audit --registry=https://registry.npmjs.org`（⚠️ 默认源 npmmirror **不支持 audit 接口**，必须显式换官方源，否则报 NOT_IMPLEMENTED；本环境约 42s，**前台会超时须后台跑**）。修复需 `npm audit fix --force` → prisma 降到 6.12.0（**破坏性**）→ **未做**。尴尬点：本项目 M5 特性就是扫依赖 CVE，自身却带 high 级漏洞 |
+| **GH 回写缺口** | `docs/product.md:38` 场景表承诺「GitLab MR / GitHub PR / push Webhook 自动触发 → 分析完成后回写 commit status（红绿灯）」，但回写实现 `reportGitLabStatus()` 开头就对非 `gitlab-mr` 来源 `return false`（`src/lib/status/gitlab-status.ts`）→ **GitHub 路径能触发分析、拿不到红绿灯** | 🔜 待议 | 实锤：该函数的 source 守卫 + `tests/gitlab-status.test.ts`「github-pr 来源跳过」用例。⚠️ 触发侧是通的（`webhook-adapters.ts` 的 `detectEvent` 已支持 `pull_request`）→ 属"只差最后一步"而非整条不通；代价低（GitLab 那路全文 96 行、一个 POST）而 GitHub 团队是多数 → 已同步写入开发计划（学习区 `ROADMAP.md` §2 第 2 段候选①），本台账只记缺口不排期 |
 
 ### 2. 代码与文档收口（S / T 系列，保留位置 + 动作 + 风险）
 | # | 条目（含位置） | 动作 / 风险 |
@@ -48,7 +49,7 @@
 
 | # | 条目 | 不做的理由 | 什么条件下回头 |
 |---|---|---|---|
-| **B1** | tsconfig `extends` 继承的 `paths` 读不到（`analyze-core.cjs:480 buildPathAliases`，代码里已自带注释承认） | 要解析 TS 配置继承链（`extends` 可指向 npm 包、可数组、可级联），成本远大于收益；两个被扫描的真实仓库都不吃 `extends` | 真要拿它扫 **monorepo** 时 |
+| **B1** | tsconfig `extends` 继承的 `paths` 读不到（`worker/analyze-core.cjs` 的 `buildPathAliases()`，代码里已自带注释承认；**定位按标识符**：`grep -n "function buildPathAliases" worker/analyze-core.cjs` —— 2026-10-08 实测 512 行，原写 `:480` 已漂移，按 L18 约定不写死行号） | 要解析 TS 配置继承链（`extends` 可指向 npm 包、可数组、可级联），成本远大于收益；两个被扫描的真实仓库都不吃 `extends` | 真要拿它扫 **monorepo** 时 |
 | **B2** | barrel 文件自身被删时无法展开符号（`analyze.worker.cjs` 的 `originOf()` / `resolveExportOrigin` 穿透段；按 `grep -n "const originOf"` 定位） | 修法要把 base 侧已删文件并入可解析集 —— 动影响图核心数据结构，**有 B4 级回归风险**，而触发场景罕见 | 真碰到一次「删 barrel 静默漏报」的实例 → **先把样本加进「形态矩阵登记表」的 ❌ 区** |
 | **E4** | README 常态化核对 | 这是**习惯**不是待办。挂在清单上只会永远显示「未完成」，且每次都要重新判断 | 若哪天希望自动化 → 做成一条 CI 检查（届时是独立决策） |
 | **P2①** | 引擎被排除出 typecheck（`tsconfig.json:42`） | CJS + Babel AST 代码，开 TS 检查要大量 `any` 断言。**但代价是真实的**：引擎没有类型层保护 | 不需要回头 —— 替代措施是「样本集 + baseline 对比」双保险，属既定口径（见 `DEVELOPING.md`） |
