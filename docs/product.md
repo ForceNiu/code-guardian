@@ -109,7 +109,7 @@
 | :--- | :--- |
 | 确定性规则 | 25 条查表（函数签名 10 类 / type/interface 字段 8 类 / enum 成员 2 类 / class 成员 5 类）+ `unknown` 兜底 |
 | AI 语义引擎 | LangGraph 4 节点管线（重述→检索→预测→建议），DeepSeek |
-| 单元测试 | 271 个，全绿（`npm test` 实测；用例数复测 `grep -h -c "^test(" tests/*.test.cjs tests/*.test.ts \| paste -sd+ - \| bc`；**此数随开发增长，用前复测**） |
+| 单元测试 | 273 个，全绿（`npm test` 实测；用例数复测 `grep -h -c "^test(" tests/*.test.cjs tests/*.test.ts \| paste -sd+ - \| bc`；**此数随开发增长，用前复测**） |
 | CI 门禁 | `lint → typecheck → test → build` 四道，全绿 |
 | 依赖 CVE 数据源 | npm Bulk Advisory（完整依赖树，含传递依赖） |
 | 体积门禁阈值 | 累计 unpackedSize 100MB（**只统计顶层直接依赖**，不含传递依赖；口径见 §10.3） |
