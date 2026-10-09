@@ -112,7 +112,7 @@ code-guardian/
 
 > ⚠️ **`repositories` 的这两个字段是「预留未启用」**（2026-09-20 查到）：`default_branch` 只有 `prisma/seed.ts:24` 写过一次，
 > **无任何代码读取**；`rules_config` 更是**全仓零读写**（只出现在 `prisma/schema.prisma:29` 与初始迁移 `20260902131530_init` 里）。
-> schema 那行注释原写「规则开关，热更新」，但**那套开关从未实现** —— 既没有读开关的代码，也没有改开关的入口。
+> schema 那行注释原写「规则开关，热更新」，但**该设计未落地** —— 既没有读开关的代码，也没有改开关的入口。
 > 📌 与上一段的 `feedbacks` 是同一个坑：**schema 里出现的字段 ≠ 已实现的能力**；引用前先 `git grep` 出它在代码里的实际读写点。
 
 **任务状态机**：`pending → parsing → analyzing → reporting → done / failed`
